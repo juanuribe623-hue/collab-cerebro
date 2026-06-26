@@ -228,7 +228,7 @@ function renderTrends(){
       <h3>${esc(t.titulo||'(sin titulo)')}</h3>
       <div class="desc">${esc(t.descripcion||'')}</div>
       ${tags?`<div class="badges">${tags}</div>`:''}
-      ${videos?`<div class="videos"><div class="vt">Ejemplos con impacto real</div>${videos}</div>`:''}
+      <div class="videos"><div class="vt">Ejemplos con impacto real</div>${videos||'<div style="font-size:12px;color:var(--gray);margin-bottom:6px">Aun sin ejemplos.</div>'}<button class="est-btn" style="margin-top:2px" onclick="buscarEjemplos('${t.id}',this)">Buscar ejemplos en TikTok</button></div>
       <div class="estado-row">
         <span class="lbl">Estado:</span>
         <button class="est-btn en_uso ${estado==='en_uso'?'on':''}" onclick="setEstado('${t.id}','en_uso')">En uso</button>
@@ -257,7 +257,7 @@ async function generarTendencias(){
   const b=document.getElementById('genBtn'); b.disabled=true; b.textContent='Generando...';
   try{
     const sys = `Eres el motor de tendencias de una agencia de contenido. Identificas tendencias reales y actuales de redes en Colombia que sean afines a la marca. Responde SOLO un array JSON, sin texto extra.`;
-    const user = `Marca: ${BRAND_CONTEXT}\n\nGenera 6 tendencias afines (mezcla Instagram y TikTok), sin repetir las que ya existen: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}.\nCada objeto: { "titulo", "descripcion", "pilar" (uno de: ${PILARES.join(', ')}), "plataformas" (array con "instagram" y/o "tiktok"), "tipo": "tendencia", "tags" (array 2-4) }.`;
+    const user = `Marca: ${BRAND_CONTEXT}\n\nGenera 6 tendencias afines (mezcla Instagram y TikTok), sin repetir las que ya existen: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}.\nCada objeto: { "titulo", "descripcion", "pilar" (uno de: ${PILARES.join(', ')}), "plataformas" (array con "instagram" y/o "tiktok"), "tipo": "tendencia", "tags" (array 2-4), "busqueda" (2 a 5 palabras en espanol para buscar ejemplos reales de la tendencia en TikTok) }.`;
     const r = await api('/claude',{method:'POST',body:{ model:'claude-sonnet-4-6', max_tokens:1500, system:sys, messages:[{role:'user',content:user}] }});
     let txt = (r.content?.[0]?.text||'').replace(/```json|```/g,'').trim();
     const arr = JSON.parse(txt);
@@ -268,6 +268,29 @@ async function generarTendencias(){
     toast('Generadas '+arr.length+' tendencias. Recuerda Guardar.');
   }catch(e){ toast('Error generando: '+e.message); }
   b.disabled=false; b.textContent='Traer tendencias';
+}
+
+// Buscar ejemplos reales (TikTok) para una tendencia, via Apify
+async function buscarEjemplos(id, btn){
+  const t=TRENDS.find(x=>x.id===id); if(!t) return;
+  const q = t.busqueda || t.titulo || '';
+  const orig = btn.textContent; btn.disabled=true; btn.textContent='Buscando... (30s aprox)';
+  try{
+    const items = await api('/apify',{method:'POST',body:{
+      path:'/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items',
+      method:'POST',
+      body:{ searchQueries:[q], resultsPerPage:5, shouldDownloadVideos:false, shouldDownloadCovers:false, shouldDownloadSubtitles:false }
+    }});
+    const vids=(items||[]).filter(v=>v && v.webVideoUrl)
+      .sort((a,b)=>(b.playCount||0)-(a.playCount||0)).slice(0,2)
+      .map(v=>({ url:v.webVideoUrl, plataforma:'tiktok', vistas:v.playCount||0, likes:v.diggCount||0 }));
+    t.videos = vids;
+    renderTrends();
+    toast(vids.length ? ('Encontre '+vids.length+' ejemplos. Recuerda Guardar.') : ('Sin ejemplos para "'+q+'".'));
+  }catch(e){
+    toast('Error buscando: '+e.message);
+    btn.disabled=false; btn.textContent=orig;
+  }
 }
 
 // ───────── util ─────────
