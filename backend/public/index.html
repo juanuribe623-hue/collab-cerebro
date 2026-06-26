@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Collab Cerebro</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --ink:#13245A; --navy:#1E3A8A; --navy2:#2C5282; --sky:#A8D5E2; --blue:#4A90E2;
+    --slate:#2D3748; --gray:#5B6573; --line:#E2E8F0; --bg:#F4F7FC; --white:#fff;
+    --pale:#EEF3FB; --green:#1B8A4B; --amber:#9A6A1A; --terra:#B5613B;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--slate);font-size:14px}
+  button{font-family:inherit;cursor:pointer}
+  .hidden{display:none!important}
+
+  /* LOGIN */
+  #login{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--ink)}
+  #login .card{background:#fff;padding:40px;border-radius:14px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  #login h1{color:var(--navy);font-size:24px;margin-bottom:4px}
+  #login p{color:var(--gray);margin-bottom:24px;font-size:13px}
+  #login input{width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;margin-bottom:12px;font-size:14px}
+  #login button{width:100%;padding:12px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-weight:600;font-size:14px}
+  #login .err{color:#c0392b;font-size:13px;margin-top:8px;min-height:18px}
+
+  /* SHELL */
+  #app{display:flex;min-height:100vh}
+  #sidebar{width:230px;background:var(--ink);color:#cdd8ee;padding:18px 0;flex-shrink:0}
+  #sidebar .logo{padding:0 22px 18px;font-weight:700;color:#fff;font-size:18px;letter-spacing:.5px}
+  #sidebar .logo span{color:var(--sky)}
+  #sidebar nav a{display:block;padding:11px 22px;color:#cdd8ee;text-decoration:none;font-size:14px;border-left:3px solid transparent}
+  #sidebar nav a.active{background:rgba(255,255,255,.07);border-left-color:var(--sky);color:#fff;font-weight:600}
+  #sidebar nav a.soon{opacity:.5;cursor:default}
+  #sidebar nav a.soon::after{content:' · pronto';font-size:11px;color:var(--sky)}
+  #sidebar .user{padding:14px 22px;font-size:12px;color:#9fb2d6;border-top:1px solid rgba(255,255,255,.1);margin-top:14px}
+  #sidebar .user a{color:var(--sky);cursor:pointer}
+  #main{flex:1;padding:26px 32px;overflow:auto}
+  .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+  .head h2{color:var(--navy);font-size:22px}
+  .head .sub{color:var(--gray);font-size:13px;margin-top:2px}
+
+  /* TOOLBAR */
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px;background:#fff;padding:12px;border-radius:10px;border:1px solid var(--line)}
+  .toolbar select,.toolbar input{padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;background:#fff}
+  .toolbar .grow{flex:1}
+  .btn{padding:9px 16px;border:none;border-radius:8px;font-weight:600;font-size:13px}
+  .btn-primary{background:var(--navy);color:#fff}
+  .btn-ghost{background:var(--pale);color:var(--navy)}
+  .btn:disabled{opacity:.5;cursor:default}
+
+  /* CARDS */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(30,58,138,.05)}
+  .card h3{color:var(--navy);font-size:15px;margin-bottom:8px}
+  .card .desc{color:var(--gray);font-size:13px;line-height:1.45;margin-bottom:10px}
+  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .badge{font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px}
+  .b-pilar{background:#EAF1FB;color:var(--navy)}
+  .b-gap{background:#FCEFE7;color:var(--terra)}
+  .b-plat{background:#EEF3FB;color:var(--navy2)}
+  .b-tag{background:#F1F5F9;color:var(--gray)}
+  .videos{border-top:1px dashed var(--line);padding-top:10px;margin-bottom:10px}
+  .videos .vt{font-size:11px;font-weight:700;color:var(--terra);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+  .videos a{display:block;font-size:12px;color:var(--blue);text-decoration:none;margin-bottom:4px}
+  .videos a span{color:var(--gray)}
+  .estado-row{display:flex;gap:6px;align-items:center;border-top:1px solid var(--line);padding-top:10px}
+  .estado-row .lbl{font-size:11px;color:var(--gray);margin-right:auto}
+  .est-btn{font-size:11px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--gray)}
+  .est-btn.on{color:#fff;border-color:transparent}
+  .est-btn.on.en_uso{background:var(--green)}
+  .est-btn.on.guardada{background:var(--navy)}
+  .est-btn.on.descartada{background:#94a3b8}
+  .empty{text-align:center;color:var(--gray);padding:60px 20px}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--ink);color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;z-index:50}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<!-- ───────── CONFIG: completar tras crear el proyecto de Supabase ───────── -->
+<script>
+  const CONFIG = {
+    SUPABASE_URL:  "TODO_SUPABASE_URL",       // ej: https://xxxx.supabase.co
+    SUPABASE_ANON: "TODO_SUPABASE_ANON_KEY",  // anon/public key (segura para el frontend)
+    API_BASE:      "",                         // "" = mismo origen (Railway). Local: http://localhost:3001
+  };
+  // Contexto de marca (TEMP: pasara al modulo Brief, por empresa). Pilares del analisis de IG.
+  const BRAND_CONTEXT = `Casa Precis: concept store de alto diseno colombiano, 120+ disenadores, tiendas en Bogota y Cartagena. Voz femenina, calida, literaria, "muy de aqui", orgullo colombiano. Pilares: 1) Conoce al disenador, 2) Identidad muy de aqui, 3) Curaduria con criterio, 4) Styling y guias, 5) Colaboraciones/UGC, 6) Founder y detras de camaras, 7) Venta/eventos (poca). Optimizar para guardados/compartidos, no likes. Audiencia mayoritariamente mujeres.`;
+</script>
+
+<!-- ───────── LOGIN ───────── -->
+<div id="login">
+  <div class="card">
+    <h1>Collab <span style="color:var(--sky)">Cerebro</span></h1>
+    <p>Tu cerebro de contenido. Inicia sesion.</p>
+    <input id="email" type="email" placeholder="correo" autocomplete="username" />
+    <input id="password" type="password" placeholder="contraseña" autocomplete="current-password" />
+    <button onclick="doLogin()">Entrar</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- ───────── APP ───────── -->
+<div id="app" class="hidden">
+  <aside id="sidebar">
+    <div class="logo">Collab <span>Cerebro</span></div>
+    <nav>
+      <a class="active" data-view="trends" onclick="go('trends')">Banco de Tendencias</a>
+      <a class="soon">Ideas / Angulos</a>
+      <a class="soon">Guiones</a>
+      <a class="soon">Influencers / BrandFit</a>
+      <a class="soon">Calendario</a>
+    </nav>
+    <div class="user">
+      <div id="userEmail"></div>
+      <a onclick="doLogout()">Cerrar sesion</a>
+    </div>
+  </aside>
+
+  <main id="main">
+    <!-- BANCO DE TENDENCIAS -->
+    <section id="view-trends">
+      <div class="head">
+        <div>
+          <h2>Banco de Tendencias</h2>
+          <div class="sub">Tendencias y gaps afines a tu marca. Elige cuales desarrollar, guarda las demas.</div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-ghost" onclick="generarTendencias()" id="genBtn">Traer tendencias</button>
+          <button class="btn btn-primary" onclick="saveTrends()" id="saveBtn">Guardar</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <select id="fPilar" onchange="renderTrends()"><option value="">Todos los pilares</option></select>
+        <select id="fPlat" onchange="renderTrends()">
+          <option value="">Toda plataforma</option><option>instagram</option><option>tiktok</option>
+        </select>
+        <select id="fTipo" onchange="renderTrends()">
+          <option value="">Tendencia y gap</option><option value="tendencia">Tendencia</option><option value="gap">Gap</option>
+        </select>
+        <select id="fEstado" onchange="renderTrends()">
+          <option value="">Todo estado</option><option value="nueva">Nueva</option><option value="en_uso">En uso</option><option value="guardada">Guardada</option><option value="descartada">Descartada</option>
+        </select>
+        <input class="grow" id="fSearch" placeholder="Buscar por texto o tag..." oninput="renderTrends()" />
+      </div>
+      <div class="grid" id="trendGrid"></div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ───────── Supabase + auth ─────────
+const sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON);
+let TRENDS = [];
+const PILARES = ["Conoce al disenador","Identidad muy de aqui","Curaduria con criterio","Styling y guias","Colaboraciones/UGC","Founder y detras de camaras","Venta/eventos"];
+
+async function getToken(){ const { data } = await sb.auth.getSession(); return data.session?.access_token || null; }
+
+async function api(path, opts={}){
+  const token = await getToken();
+  const res = await fetch(CONFIG.API_BASE + path, {
+    method: opts.method || 'GET',
+    headers: { 'Content-Type':'application/json', ...(token?{'Authorization':'Bearer '+token}:{}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if(!res.ok){ const e = await res.json().catch(()=>({error:res.statusText})); throw new Error(e.error||'Error'); }
+  return res.json();
+}
+
+async function doLogin(){
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const errEl = document.getElementById('loginErr'); errEl.textContent = '';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ errEl.textContent = error.message; return; }
+  boot();
+}
+async function doLogout(){ await sb.auth.signOut(); location.reload(); }
+
+async function boot(){
+  const { data } = await sb.auth.getSession();
+  if(!data.session){ document.getElementById('login').classList.remove('hidden'); document.getElementById('app').classList.add('hidden'); return; }
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('userEmail').textContent = data.session.user.email;
+  // poblar filtro de pilares
+  const fp = document.getElementById('fPilar');
+  PILARES.forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p; fp.appendChild(o); });
+  await loadTrends();
+}
+
+// ───────── Banco de Tendencias ─────────
+async function loadTrends(){
+  try{ TRENDS = await api('/api/trends'); renderTrends(); }
+  catch(e){ toast('No pude cargar: '+e.message); }
+}
+
+function filtered(){
+  const pil=document.getElementById('fPilar').value, plat=document.getElementById('fPlat').value,
+        tipo=document.getElementById('fTipo').value, est=document.getElementById('fEstado').value,
+        q=document.getElementById('fSearch').value.toLowerCase().trim();
+  return TRENDS.filter(t=>{
+    if(pil && t.pilar!==pil) return false;
+    if(plat && !(t.plataformas||[]).includes(plat)) return false;
+    if(tipo && (t.tipo||'tendencia')!==tipo) return false;
+    if(est && (t.estado||'nueva')!==est) return false;
+    if(q){ const hay=((t.titulo||'')+' '+(t.descripcion||'')+' '+(t.tags||[]).join(' ')).toLowerCase(); if(!hay.includes(q)) return false; }
+    return true;
+  });
+}
+
+function renderTrends(){
+  const grid=document.getElementById('trendGrid'); const items=filtered();
+  if(!items.length){ grid.innerHTML='<div class="empty">No hay tendencias con esos filtros. Dale a "Traer tendencias" para generar.</div>'; return; }
+  grid.innerHTML = items.map(t=>{
+    const estado=t.estado||'nueva';
+    const videos=(t.videos||[]).map(v=>`<a href="${v.url}" target="_blank">▶ ${v.plataforma||'video'} <span>· ${v.vistas?fmt(v.vistas)+' vistas':''} ${v.engagement?'· '+v.engagement+' eng':''}</span></a>`).join('');
+    const tags=(t.tags||[]).map(x=>`<span class="badge b-tag">#${x}</span>`).join('');
+    return `<div class="card">
+      <div class="badges">
+        <span class="badge ${ (t.tipo==='gap')?'b-gap':'b-pilar'}">${t.tipo==='gap'?'GAP':(t.pilar||'tendencia')}</span>
+        ${(t.plataformas||[]).map(p=>`<span class="badge b-plat">${p}</span>`).join('')}
+      </div>
+      <h3>${esc(t.titulo||'(sin titulo)')}</h3>
+      <div class="desc">${esc(t.descripcion||'')}</div>
+      ${tags?`<div class="badges">${tags}</div>`:''}
+      ${videos?`<div class="videos"><div class="vt">Ejemplos con impacto real</div>${videos}</div>`:''}
+      <div class="estado-row">
+        <span class="lbl">Estado:</span>
+        <button class="est-btn en_uso ${estado==='en_uso'?'on':''}" onclick="setEstado('${t.id}','en_uso')">En uso</button>
+        <button class="est-btn guardada ${estado==='guardada'?'on':''}" onclick="setEstado('${t.id}','guardada')">Guardar</button>
+        <button class="est-btn descartada ${estado==='descartada'?'on':''}" onclick="setEstado('${t.id}','descartada')">Descartar</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function setEstado(id, estado){
+  const t=TRENDS.find(x=>x.id===id); if(!t) return;
+  t.estado = (t.estado===estado)?'nueva':estado;
+  renderTrends();
+}
+
+async function saveTrends(){
+  const b=document.getElementById('saveBtn'); b.disabled=true; b.textContent='Guardando...';
+  try{ const r=await api('/api/trends',{method:'PUT',body:TRENDS}); toast('Guardado ('+r.count+')'); }
+  catch(e){ toast('Error: '+e.message); }
+  b.disabled=false; b.textContent='Guardar';
+}
+
+// Traer tendencias: version 1 (Claude). El wire de Apify (datos reales + videos) viene en el siguiente paso.
+async function generarTendencias(){
+  const b=document.getElementById('genBtn'); b.disabled=true; b.textContent='Generando...';
+  try{
+    const sys = `Eres el motor de tendencias de una agencia de contenido. Identificas tendencias reales y actuales de redes en Colombia que sean afines a la marca. Responde SOLO un array JSON, sin texto extra.`;
+    const user = `Marca: ${BRAND_CONTEXT}\n\nGenera 6 tendencias afines (mezcla Instagram y TikTok), sin repetir las que ya existen: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}.\nCada objeto: { "titulo", "descripcion", "pilar" (uno de: ${PILARES.join(', ')}), "plataformas" (array con "instagram" y/o "tiktok"), "tipo": "tendencia", "tags" (array 2-4) }.`;
+    const r = await api('/claude',{method:'POST',body:{ model:'claude-sonnet-4-6', max_tokens:1500, system:sys, messages:[{role:'user',content:user}] }});
+    let txt = (r.content?.[0]?.text||'').replace(/```json|```/g,'').trim();
+    const arr = JSON.parse(txt);
+    const now = Date.now();
+    arr.forEach(t=>{ t.id='trend_'+Math.random().toString(36).slice(2,10); t.estado='nueva'; t.fuente='claude'; t.creado_en=now; t.videos=t.videos||[]; });
+    TRENDS = [...arr, ...TRENDS];
+    renderTrends();
+    toast('Generadas '+arr.length+' tendencias. Recuerda Guardar.');
+  }catch(e){ toast('Error generando: '+e.message); }
+  b.disabled=false; b.textContent='Traer tendencias';
+}
+
+// ───────── util ─────────
+function go(view){ document.querySelectorAll('#sidebar nav a').forEach(a=>a.classList.toggle('active', a.dataset.view===view)); }
+function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmt(n){ n=+n; return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':n; }
+let toastT;
+function toast(m){ const el=document.getElementById('toast'); el.textContent=m; el.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),2600); }
+
+// arranque
+boot();
+</script>
+</body>
+</html>

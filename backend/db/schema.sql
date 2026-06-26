@@ -1,0 +1,40 @@
+-- Collab Cerebro — esquema base (multi-tenant).
+-- INSTRUCCIONES: pegar y correr en Supabase -> SQL Editor del proyecto NUEVO.
+
+-- Empresas (cada cliente = una company)
+CREATE TABLE IF NOT EXISTS companies (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Miembros: mapea cada usuario de Supabase Auth a su empresa
+CREATE TABLE IF NOT EXISTS company_members (
+  user_id    UUID NOT NULL,
+  company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL DEFAULT 'member',  -- 'admin' | 'member'
+  created_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (user_id, company_id)
+);
+CREATE INDEX IF NOT EXISTS idx_company_members_user ON company_members (user_id);
+
+-- Banco de Tendencias / Gaps (Señales del cerebro), por empresa
+-- data: { titulo, descripcion, pilar, plataformas[], formato, tipo ('tendencia'|'gap'),
+--         tags[], estado ('nueva'|'en_uso'|'guardada'|'descartada'),
+--         videos[ { url, plataforma, vistas, likes, engagement } ], fuente, creado_en }
+CREATE TABLE IF NOT EXISTS content_trends (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID   NOT NULL,
+  trend_id   TEXT   NOT NULL,
+  data       JSONB  NOT NULL DEFAULT '{}'::jsonb,
+  updated_at BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_content_trends_company ON content_trends (company_id);
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- SEMBRAR EL PRIMER CLIENTE (Casa Precis)
+-- 1) Crear la empresa:
+--    INSERT INTO companies (name) VALUES ('Casa Precis') RETURNING id;
+-- 2) Con ese id y el UUID de cada usuario (de Supabase Auth -> Users), asignar:
+--    INSERT INTO company_members (user_id, company_id, role)
+--    VALUES ('<uuid-del-usuario>', '<id-de-la-empresa>', 'admin');
