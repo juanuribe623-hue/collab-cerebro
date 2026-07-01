@@ -65,6 +65,28 @@ CREATE TABLE IF NOT EXISTS content_influencers (
 );
 CREATE INDEX IF NOT EXISTS idx_content_influencers_company ON content_influencers (company_id);
 
+-- Watchlist de creadores por empresa (seguimiento con snapshots de crecimiento)
+-- data: { handle, plataforma, nombre, seguidores, er, medianViews, verified,
+--         agregado_en, snapshots[ { fecha, seguidores, er, medianViews } ] }
+CREATE TABLE IF NOT EXISTS watchlist_creators (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID   NOT NULL,
+  wl_id      TEXT   NOT NULL,
+  data       JSONB  NOT NULL DEFAULT '{}'::jsonb,
+  updated_at BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_company ON watchlist_creators (company_id);
+
+-- Base GLOBAL de creadores de Collab (cross-tenant, insumo de la agencia). Uno por (plataforma, handle).
+CREATE TABLE IF NOT EXISTS agency_creators (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  plataforma TEXT   NOT NULL,
+  handle     TEXT   NOT NULL,
+  data       JSONB  NOT NULL DEFAULT '{}'::jsonb,
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  UNIQUE (plataforma, handle)
+);
+
 -- ───────────────────────────────────────────────────────────────────────────
 -- SEMBRAR EL PRIMER CLIENTE (Casa Precis)
 -- 1) Crear la empresa:

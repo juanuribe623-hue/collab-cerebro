@@ -37,6 +37,8 @@ app.use('/api/brief',       require('./routes/brief'));
 app.use('/api/trends',      require('./routes/trends'));
 app.use('/api/scripts',     require('./routes/scripts'));
 app.use('/api/influencers', require('./routes/influencers'));
+app.use('/api/watchlist',       require('./routes/watchlist'));
+app.use('/api/agency-creators', require('./routes/agency'));
 app.use('/',            require('./routes/proxy'));   // /claude y /apify
 
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));

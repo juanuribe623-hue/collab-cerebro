@@ -143,6 +143,10 @@
   .peso-row input[type=range]{width:100%;accent-color:var(--green)}
   .peso-row .pv{font-weight:700;color:var(--navy);text-align:right;font-size:13px}
   .pesos-total{margin-top:10px;font-size:13px;color:var(--gray);text-align:right}
+  .delta{font-weight:700}
+  .delta.up{color:var(--green)} .delta.down{color:#c0392b} .delta.flat{color:var(--gray)}
+  .wl-metrics{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--gray);margin:8px 0 10px}
+  .wl-metrics b{color:var(--slate)}
 </style>
 </head>
 <body>
@@ -188,6 +192,7 @@
       <a data-view="brief" onclick="go('brief')">Brief de marca</a>
       <a data-view="brandfit" onclick="go('brandfit')">Influencers / BrandFit</a>
       <a data-view="radar" onclick="go('radar')">Radar emergentes</a>
+      <a data-view="watchlist" onclick="go('watchlist')">Watchlist</a>
       <a class="soon">Calendario</a>
       <a class="soon">Insights</a>
     </nav>
@@ -317,6 +322,7 @@
       <div class="toolbar">
         <input class="grow" id="radarTerm" placeholder="Termino opcional para enfocar (vacio = usa el Brief de la marca)" />
         <select id="radarMin">
+          <option value="0">Sin filtro de seguidores</option>
           <option value="3000">Min 3K seguidores</option>
           <option value="5000" selected>Min 5K seguidores</option>
           <option value="10000">Min 10K seguidores</option>
@@ -324,6 +330,18 @@
         <button class="btn btn-primary" onclick="correrRadar()" id="radarBtn">Correr radar</button>
       </div>
       <div class="grid" id="radarGrid"><div class="empty">Corre el radar para descubrir creadores en ascenso afines a la marca.</div></div>
+    </section>
+
+    <!-- WATCHLIST -->
+    <section id="view-watchlist" class="hidden">
+      <div class="head">
+        <div>
+          <h2>Watchlist</h2>
+          <div class="sub">Sigue creadores en el tiempo y confirma quien crece de verdad. Cada medicion guarda un snapshot.</div>
+        </div>
+        <button class="btn btn-primary" onclick="actualizarWatchlist()" id="wlBtn">Actualizar metricas</button>
+      </div>
+      <div class="grid" id="wlGrid"><div class="empty">Aun no sigues a nadie. Agrega creadores desde el Radar o desde BrandFit.</div></div>
     </section>
   </main>
 </div>
@@ -340,6 +358,7 @@ let ANGLES  = [];       // angulos efimeros de la sesion actual
 let CURRENT = null;     // guion abierto en el modal
 let INFLUENCERS = [];   // creadores evaluados (BrandFit)
 let RADAR = [];         // creadores emergentes descubiertos (efimero en v1)
+let WATCHLIST = [];     // creadores en seguimiento (con snapshots)
 const BF_CRITERIOS=[
   {key:'audiencia',   label:'Audiencia objetivo',           def:30},
   {key:'credibilidad',label:'Credibilidad en la categoria', def:25},
@@ -391,6 +410,7 @@ async function boot(){
   await loadTrends();
   await loadScripts();
   await loadInfluencers();
+  await loadWatchlist();
 }
 
 // ───────── Brief de marca ─────────
@@ -795,8 +815,8 @@ async function fetchProfile(plat,handle){
     const a=items[0].authorMeta||{};
     const s=items.slice(0,8), fans=a.fans||0;
     const avgL=s.length?s.reduce((n,v)=>n+(v.diggCount||0),0)/s.length:0;
-    return { nombre:a.nickName||handle, seguidores:fans, bio:a.signature||'', posts:a.video||s.length,
-      er:fans?+((avgL/fans*100).toFixed(2)):0,
+    return { nombre:a.nickName||handle, seguidores:fans, bio:a.signature||'', posts:a.video||s.length, verified:!!a.verified,
+      er:fans?+((avgL/fans*100).toFixed(2)):0, medianViews:median(s.map(v=>v.playCount||0)),
       muestras:s.slice(0,6).map(v=>({ texto:((v.text||'')+'').slice(0,110), vistas:v.playCount||0, likes:v.diggCount||0 })) };
   }else{
     const items=await api('/apify',{method:'POST',body:{
@@ -806,8 +826,8 @@ async function fetchProfile(plat,handle){
     const p=items && items[0]; if(!p) return null;
     const posts=p.latestPosts||[], fol=p.followersCount||0;
     const avgL=posts.length?posts.reduce((n,x)=>n+(x.likesCount||0),0)/posts.length:0;
-    return { nombre:p.fullName||handle, seguidores:fol, bio:p.biography||'', posts:p.postsCount||posts.length,
-      er:fol?+((avgL/fol*100).toFixed(2)):0,
+    return { nombre:p.fullName||handle, seguidores:fol, bio:p.biography||'', posts:p.postsCount||posts.length, verified:!!p.verified,
+      er:fol?+((avgL/fol*100).toFixed(2)):0, medianViews:median(posts.map(x=>x.videoViewCount||0)),
       muestras:posts.slice(0,6).map(x=>({ texto:((x.caption||'')+'').slice(0,110), likes:x.likesCount||0, vistas:x.videoViewCount||0 })) };
   }
 }
@@ -883,7 +903,7 @@ function openInfluencer(id){
       ${chips?`<div class="chips">${chips}</div>`:''}
       <div class="rec ${recBoxClass(i.recomendacion)}"><div class="rec-t">Recomendacion: ${esc(i.recomendacion||'')}</div><div>${esc(i.recomendacion_detalle||'')}</div></div>
     </div>
-    <div class="modal-foot"><button class="btn btn-ghost" onclick="borrarInfluencer('${i.id}')">Eliminar</button><button class="btn btn-primary" onclick="closeModal()">Cerrar</button></div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="borrarInfluencer('${i.id}')">Eliminar</button><button class="btn btn-ghost" onclick="wlFromInf('${i.id}')">+ Watchlist</button><button class="btn btn-primary" onclick="closeModal()">Cerrar</button></div>
   </div>`;
   m.classList.remove('hidden');
 }
@@ -972,6 +992,7 @@ function renderRadar(){
       <div class="desc">Vistas medianas ${fmt(a.medianViews)} en ${a.nVids} video(s). ${a.ratio>=3?'Su contenido rinde muy por encima de sus seguidores: senal de ascenso.':'Rendimiento estable frente a su base.'}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${a.sample[0]?`<a class="est-btn" href="${a.sample[0]}" target="_blank" style="text-decoration:none">Ver video</a>`:''}
+        <button class="est-btn" onclick="wlFromRadar('${esc(a.handle)}')">+ Watchlist</button>
         <button class="btn btn-ghost" onclick="radarToBrandFit('${esc(a.handle)}')">Evaluar en BrandFit</button>
       </div>
     </div>`;
@@ -983,6 +1004,93 @@ function radarToBrandFit(handle){
   go('brandfit'); evaluarBrandFit();
 }
 
+// ───────── Watchlist ─────────
+async function loadWatchlist(){ try{ WATCHLIST=await api('/api/watchlist'); }catch(e){} renderWatchlist(); }
+async function persistWatchlist(){ await api('/api/watchlist',{method:'PUT',body:WATCHLIST}); }
+// captura en la base global de Collab (insumo agencia), fire-and-forget
+function captureAgency(list){ api('/api/agency-creators',{method:'POST',body:list}).catch(()=>{}); }
+
+async function addToWatchlist(c){
+  if(!c||!c.handle) return;
+  if(WATCHLIST.find(x=>x.handle===c.handle && x.plataforma===c.plataforma)){ toast('Ya esta en el watchlist.'); return; }
+  const now=Date.now();
+  const snap={ fecha:now, seguidores:c.seguidores||0, er:c.er||0, medianViews:c.medianViews||0 };
+  const item={ id:'wl_'+Math.random().toString(36).slice(2,10), handle:c.handle, plataforma:c.plataforma,
+    nombre:c.nombre||c.handle, seguidores:snap.seguidores, er:snap.er, medianViews:snap.medianViews,
+    verified:!!c.verified, agregado_en:now, snapshots:[snap] };
+  WATCHLIST=[item,...WATCHLIST];
+  try{ await persistWatchlist(); }catch(e){ toast('Error guardando: '+e.message); }
+  captureAgency([{handle:c.handle,plataforma:c.plataforma,nombre:item.nombre,seguidores:snap.seguidores,er:snap.er,medianViews:snap.medianViews,verified:item.verified}]);
+  renderWatchlist();
+  toast('Agregado al watchlist.');
+}
+function wlFromRadar(handle){
+  const a=RADAR.find(x=>x.handle===handle); if(!a) return;
+  addToWatchlist({ handle:a.handle, plataforma:'tiktok', nombre:a.nombre, seguidores:a.followers, er:(a.er||0)*100, medianViews:a.medianViews, verified:a.verified });
+}
+function wlFromInf(id){
+  const i=INFLUENCERS.find(x=>x.id===id); if(!i) return;
+  addToWatchlist({ handle:i.handle, plataforma:i.plataforma, nombre:i.nombre, seguidores:i.seguidores, er:i.er, medianViews:i.medianViews||0, verified:i.verified });
+}
+
+async function actualizarWatchlist(){
+  if(!WATCHLIST.length){ toast('El watchlist esta vacio.'); return; }
+  const b=document.getElementById('wlBtn'); b.disabled=true;
+  const now=Date.now(); let ok=0;
+  for(let k=0;k<WATCHLIST.length;k++){
+    const w=WATCHLIST[k]; b.textContent='Actualizando '+(k+1)+'/'+WATCHLIST.length+'...';
+    try{
+      const p=await fetchProfile(w.plataforma,w.handle);
+      if(p){
+        const snap={ fecha:now, seguidores:p.seguidores||0, er:p.er||0, medianViews:p.medianViews||0 };
+        w.snapshots=[...(w.snapshots||[]), snap];
+        w.seguidores=snap.seguidores; w.er=snap.er; w.medianViews=snap.medianViews;
+        if(p.nombre) w.nombre=p.nombre;
+        ok++;
+        captureAgency([{handle:w.handle,plataforma:w.plataforma,nombre:w.nombre,seguidores:snap.seguidores,er:snap.er,medianViews:snap.medianViews,verified:w.verified}]);
+      }
+    }catch(e){ /* sigue con el siguiente */ }
+  }
+  try{ await persistWatchlist(); }catch(e){}
+  renderWatchlist();
+  b.disabled=false; b.textContent='Actualizar metricas';
+  toast('Medidos '+ok+'/'+WATCHLIST.length+'. Snapshot guardado.');
+}
+
+function pctDelta(first,last){ if(!first) return 0; return Math.round((last-first)/first*100); }
+function renderWatchlist(){
+  const g=document.getElementById('wlGrid'); if(!g) return;
+  if(!WATCHLIST.length){ g.innerHTML='<div class="empty">Aun no sigues a nadie. Agrega creadores desde el Radar o desde BrandFit.</div>'; return; }
+  g.innerHTML=WATCHLIST.map(w=>{
+    const snaps=w.snapshots||[]; const first=snaps[0]||{}; const last=snaps[snaps.length-1]||{};
+    const dF=pctDelta(first.seguidores||0, last.seguidores||0);
+    const dE=(+(last.er||0))-(+(first.er||0));
+    const clsF=dF>0?'up':(dF<0?'down':'flat'); const clsE=dE>0.1?'up':(dE<-0.1?'down':'flat');
+    return `<div class="card">
+      <div class="bf-top"><div><div class="who">@${esc(w.handle)}${w.verified?' ✓':''}</div><div class="sub2">${esc(w.plataforma)} · ${snaps.length} medicion(es)</div></div></div>
+      <div class="wl-metrics">
+        <span>Seguidores <b>${fmt(last.seguidores||0)}</b> <span class="delta ${clsF}">${dF>0?'+':''}${dF}%</span></span>
+        <span>ER <b>${(+(last.er||0)).toFixed(1)}%</b> <span class="delta ${clsE}">${dE>0?'+':''}${dE.toFixed(1)} pts</span></span>
+      </div>
+      <div class="desc">${snaps.length<2?'Aun sin comparacion. Dale "Actualizar metricas" en unos dias para medir crecimiento.':(dF>3?'Creciendo de forma sostenida.':(dF<-3?'A la baja.':'Estable por ahora.'))}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-ghost" onclick="radarToBrandFitWL('${esc(w.handle)}','${esc(w.plataforma)}')">Evaluar en BrandFit</button>
+        <button class="est-btn" onclick="quitarWatchlist('${w.id}')">Quitar</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+function radarToBrandFitWL(handle,plat){
+  const p=document.getElementById('bfPlat'), h=document.getElementById('bfHandle');
+  if(p) p.value=plat; if(h) h.value=handle;
+  go('brandfit'); evaluarBrandFit();
+}
+async function quitarWatchlist(id){
+  WATCHLIST=WATCHLIST.filter(x=>x.id!==id);
+  try{ await persistWatchlist(); }catch(e){}
+  renderWatchlist(); toast('Quitado del watchlist.');
+}
+
 // ───────── util ─────────
 function go(view){
   document.querySelectorAll('#sidebar nav a').forEach(a=>a.classList.toggle('active', a.dataset.view===view));
@@ -991,6 +1099,7 @@ function go(view){
   if(view==='brief') fillBriefForm();
   if(view==='brandfit'){ renderPesos(); renderBrandFit(); }
   if(view==='radar') renderRadar();
+  if(view==='watchlist') renderWatchlist();
 }
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmt(n){ n=+n; return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':n; }
