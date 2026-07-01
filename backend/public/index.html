@@ -316,6 +316,11 @@
       </div>
       <div class="toolbar">
         <input class="grow" id="radarTerm" placeholder="Termino opcional para enfocar (vacio = usa el Brief de la marca)" />
+        <select id="radarMin">
+          <option value="3000">Min 3K seguidores</option>
+          <option value="5000" selected>Min 5K seguidores</option>
+          <option value="10000">Min 10K seguidores</option>
+        </select>
         <button class="btn btn-primary" onclick="correrRadar()" id="radarBtn">Correr radar</button>
       </div>
       <div class="grid" id="radarGrid"><div class="empty">Corre el radar para descubrir creadores en ascenso afines a la marca.</div></div>
@@ -925,6 +930,7 @@ async function correrRadar(){
         `Marca: ${BRAND_CONTEXT}\n\nDame 3 terminos (2 a 4 palabras, en espanol, Colombia) para encontrar CREADORES afines a esta marca en TikTok. Responde solo el array JSON de strings.`,
         600)).slice(0,3);
     }
+    const minFol=+(document.getElementById('radarMin').value||5000);
     b.textContent='Rastreando creadores... (1-2 min)';
     const runs=await Promise.all(queries.map(q=>fetchTikTokAuthors(q).catch(()=>[])));
     const items=runs.flat();
@@ -945,7 +951,7 @@ async function correrRadar(){
       o.score=emergingScore(o);
       return o;
     })
-    .filter(a=>a.followers>=500 && a.followers<=200000 && a.medianViews>0)
+    .filter(a=>a.followers>=minFol && a.followers<=200000 && a.medianViews>0)
     .sort((a,b)=>b.score-a.score).slice(0,15);
     renderRadar();
     toast(RADAR.length ? ('Radar: '+RADAR.length+' creadores en ascenso.') : 'Sin candidatos claros esta vez; prueba otro termino.');
