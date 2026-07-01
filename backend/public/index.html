@@ -172,6 +172,13 @@
   .ins-rank{display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)}
   .ins-rank b{color:var(--navy)}
   #hookIn{width:100%;min-height:70px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:13px;margin-bottom:10px;resize:vertical}
+  /* identidad visual */
+  .pal{display:flex;gap:10px;flex-wrap:wrap}
+  .sw{width:118px}
+  .sw .chip{height:56px;border-radius:8px;border:1px solid var(--line)}
+  .sw .hx{font-size:12px;font-weight:700;color:var(--navy);margin-top:5px;font-family:ui-monospace,monospace}
+  .sw .nm{font-size:12px;color:var(--slate)}
+  .sw .us{font-size:11px;color:var(--gray);line-height:1.3}
 </style>
 </head>
 <body>
@@ -215,6 +222,7 @@
       <a class="active" data-view="trends" onclick="go('trends')">Banco de Tendencias</a>
       <a data-view="prod" onclick="go('prod')">Produccion</a>
       <a data-view="brief" onclick="go('brief')">Brief de marca</a>
+      <a data-view="visual" onclick="go('visual')">Identidad visual</a>
       <a data-view="brandfit" onclick="go('brandfit')">Influencers / BrandFit</a>
       <a data-view="radar" onclick="go('radar')">Radar emergentes</a>
       <a data-view="watchlist" onclick="go('watchlist')">Watchlist</a>
@@ -301,6 +309,21 @@
         <div class="bf"><label>Reglas de contenido</label><textarea id="bReg" rows="3"></textarea></div>
         <div class="bf"><label>Objetivo de engagement</label><input id="bEng" /></div>
       </div>
+    </section>
+
+    <!-- IDENTIDAD VISUAL -->
+    <section id="view-visual" class="hidden">
+      <div class="head">
+        <div>
+          <h2>Identidad visual</h2>
+          <div class="sub">Una guia para que el feed se vea cohesivo sin perder la diversidad del producto. La cohesion viene del tratamiento, no de quitar color.</div>
+        </div>
+      </div>
+      <div class="toolbar">
+        <input class="grow" id="vRefs" placeholder="Referentes opcionales de estilo (ej: @thelinenyc, @makeno.co)" />
+        <button class="btn btn-primary" onclick="generarGuiaVisual()" id="vBtn">Generar guia</button>
+      </div>
+      <div id="visualGuide"></div>
     </section>
 
     <!-- INFLUENCERS / BRANDFIT -->
@@ -510,6 +533,7 @@ function applyBrief(){
   populatePilarSelects();
   fillBriefForm();
   renderPesos();
+  renderGuiaVisual();
 }
 function populatePilarSelects(){
   const opts=PILARES.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
@@ -533,6 +557,39 @@ async function saveBrief(){
   };
   try{ await api('/api/brief',{method:'PUT',body:BRIEF}); applyBrief(); toast('Brief guardado. Ya alimenta tendencias y guiones.'); }
   catch(e){ toast('Error: '+e.message); }
+}
+
+// ── Identidad visual ──
+async function generarGuiaVisual(){
+  const refs=((document.getElementById('vRefs')||{}).value||'').trim();
+  const b=document.getElementById('vBtn'); b.disabled=true; b.textContent='Generando...';
+  try{
+    const g=await claudeJSON(
+      `Eres director de arte y brand designer. Defines una identidad visual coherente para redes sociales a partir de la marca y (si hay) referentes. Respondes SOLO un objeto JSON.`,
+      `Marca: ${BRAND_CONTEXT}${refs?`\nReferentes de estilo a considerar: ${refs}.`:''}\n\nGenera una guia de identidad visual para Instagram y TikTok que unifique un feed diverso (es un concept store con muchos productos de colores distintos) SIN quitar la diversidad del producto: la cohesion viene del TRATAMIENTO (grading de color, portadas de reels, paleta en las superficies que controla la marca, composicion del grid). Devuelve JSON: { "resumen": "una linea con la esencia visual", "paleta": [ 5 a 6 objetos { "hex":"#RRGGBB", "nombre", "uso" } ], "grading_foto", "grading_video", "portadas": "reglas para portadas de reels (tipografia, tratamiento, ubicacion del texto)", "grid": "reglas de composicion y ritmo del grid para balancear color", "dos": [3 a 5 buenas practicas], "donts": [3 a 5 cosas a evitar] }. Espanol colombiano natural. Prohibido em-dash.`,
+      2500);
+    BRIEF.visual=g;
+    try{ await api('/api/brief',{method:'PUT',body:BRIEF}); }catch(e){ toast('Generada, pero no pude guardar: '+e.message); }
+    renderGuiaVisual();
+    toast('Guia visual generada y guardada.');
+  }catch(e){ toast('Error: '+e.message); }
+  b.disabled=false; b.textContent='Generar guia';
+}
+function renderGuiaVisual(){
+  const el=document.getElementById('visualGuide'); if(!el) return;
+  const g=BRIEF.visual;
+  if(!g){ el.innerHTML='<div class="empty">Aun no hay guia. Dale "Generar guia" para crear la identidad visual de la marca.</div>'; return; }
+  const sw=(g.paleta||[]).map(c=>`<div class="sw"><div class="chip" style="background:${esc(c.hex||'#eee')}"></div><div class="hx">${esc(c.hex||'')}</div><div class="nm">${esc(c.nombre||'')}</div><div class="us">${esc(c.uso||'')}</div></div>`).join('');
+  el.innerHTML=`<div class="card">
+    ${g.resumen?`<div class="ficha">${esc(g.resumen)}</div>`:''}
+    <div class="fld"><div class="fl">Paleta</div><div class="pal">${sw||'-'}</div></div>
+    <div class="fld"><div class="fl">Grading de foto</div><div class="fv">${esc(g.grading_foto||'')}</div></div>
+    <div class="fld"><div class="fl">Grading de video</div><div class="fv">${esc(g.grading_video||'')}</div></div>
+    <div class="fld"><div class="fl">Portadas de reels</div><div class="fv">${esc(g.portadas||'')}</div></div>
+    <div class="fld"><div class="fl">Composicion del grid</div><div class="fv">${esc(g.grid||'')}</div></div>
+    <div class="fld"><div class="fl">Si</div>${(g.dos||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('')||'<div class="fv">-</div>'}</div>
+    <div class="fld"><div class="fl">Evitar</div>${(g.donts||[]).map(x=>`<div class="beat" style="color:#a02020">${esc(x)}</div>`).join('')||'<div class="fv">-</div>'}</div>
+  </div>`;
 }
 
 // ───────── Banco de Tendencias ─────────
@@ -1562,6 +1619,7 @@ function go(view){
   document.querySelectorAll('#main > section').forEach(s=>s.classList.toggle('hidden', s.id!=='view-'+view));
   if(view==='prod') refreshTrendPicker();
   if(view==='brief') fillBriefForm();
+  if(view==='visual') renderGuiaVisual();
   if(view==='brandfit'){ renderPesos(); renderBrandFit(); }
   if(view==='radar') renderRadar();
   if(view==='watchlist') renderWatchlist();
