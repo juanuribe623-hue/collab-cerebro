@@ -112,6 +112,10 @@
   .gtexto{font-size:13px;line-height:1.45;color:var(--slate)}
   .ficha{background:var(--pale);border-radius:6px;padding:7px 10px;font-size:12px;color:var(--navy);margin-bottom:10px}
   .sharev{background:#EAF7EF;border-left:3px solid var(--green);padding:8px 10px;border-radius:4px;font-weight:600;color:#14603a}
+  .bf{margin-bottom:14px}
+  .bf label{display:block;font-size:12px;font-weight:700;color:var(--gray);margin-bottom:5px}
+  .bf input,.bf textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;color:var(--slate)}
+  .bf .hint{font-size:11px;color:var(--gray);margin-top:4px}
 </style>
 </head>
 <body>
@@ -123,8 +127,16 @@
     SUPABASE_ANON: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZremlja25zZmxlbmJrb3V6YmhkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0MjA4OTYsImV4cCI6MjA5Nzk5Njg5Nn0.FeTduuP8SusEQntKOPQAEPpS2qr-PMGGxcoZqCf48Go",
     API_BASE:      "",                         // "" = mismo origen (Railway). Local: http://localhost:3001
   };
-  // Contexto de marca (TEMP: pasara al modulo Brief, por empresa). Pilares del analisis de IG.
-  const BRAND_CONTEXT = `Casa Precis: concept store de alto diseno colombiano, 120+ disenadores, tiendas en Bogota y Cartagena. Voz femenina, calida, literaria, "muy de aqui", orgullo colombiano. Pilares: 1) Conoce al disenador, 2) Identidad muy de aqui, 3) Curaduria con criterio, 4) Styling y guias, 5) Colaboraciones/UGC, 6) Founder y detras de camaras, 7) Venta/eventos (poca). Optimizar para guardados/compartidos, no likes. Audiencia mayoritariamente mujeres.`;
+  // Brief por defecto (semilla y fallback). El brief real se carga por empresa desde /api/brief.
+  const DEFAULT_BRIEF = {
+    nombre: "Casa Precis",
+    descripcion: "Concept store de alto diseno colombiano, 120+ disenadores, tiendas en Bogota y Cartagena.",
+    voz: "Femenina, calida, literaria, muy de aqui, orgullo colombiano. Conversacional, nunca corporativa.",
+    audiencia: "Mayoritariamente mujeres, amantes del diseno y de lo hecho en Colombia.",
+    pilares: ["Conoce al disenador","Identidad muy de aqui","Curaduria con criterio","Styling y guias","Colaboraciones/UGC","Founder y detras de camaras","Venta/eventos"],
+    reglas: "Nunca nombrar competencia directa (usar 'la otra marca'). Prohibido em-dash. Datos reales sobre opiniones. Tono humano.",
+    objetivo_engagement: "Optimizar para guardados y compartidos, no likes."
+  };
 </script>
 
 <!-- ───────── LOGIN ───────── -->
@@ -146,6 +158,7 @@
     <nav>
       <a class="active" data-view="trends" onclick="go('trends')">Banco de Tendencias</a>
       <a data-view="prod" onclick="go('prod')">Produccion</a>
+      <a data-view="brief" onclick="go('brief')">Brief de marca</a>
       <a class="soon">Influencers / BrandFit</a>
       <a class="soon">Calendario</a>
       <a class="soon">Insights</a>
@@ -210,6 +223,26 @@
         <div class="grid" id="angGrid"><div class="empty">Elige un tema o una tendencia en uso y dale "Generar angulos".</div></div>
       </div>
     </section>
+
+    <!-- BRIEF DE MARCA -->
+    <section id="view-brief" class="hidden">
+      <div class="head">
+        <div>
+          <h2>Brief de marca</h2>
+          <div class="sub">El contexto que alimenta las tendencias y los guiones. Editalo cuando la marca evolucione.</div>
+        </div>
+        <button class="btn btn-primary" onclick="saveBrief()">Guardar brief</button>
+      </div>
+      <div class="card" style="max-width:840px">
+        <div class="bf"><label>Nombre de la marca</label><input id="bNombre" /></div>
+        <div class="bf"><label>Descripcion (una linea)</label><textarea id="bDesc" rows="2"></textarea></div>
+        <div class="bf"><label>Voz / tono</label><textarea id="bVoz" rows="2"></textarea></div>
+        <div class="bf"><label>Audiencia</label><textarea id="bAud" rows="2"></textarea></div>
+        <div class="bf"><label>Pilares de contenido</label><textarea id="bPil" rows="7"></textarea><div class="hint">Uno por linea. Alimenta los filtros y la seleccion de pilar.</div></div>
+        <div class="bf"><label>Reglas de contenido</label><textarea id="bReg" rows="3"></textarea></div>
+        <div class="bf"><label>Objetivo de engagement</label><input id="bEng" /></div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -223,7 +256,14 @@ let TRENDS = [];
 let SCRIPTS = [];       // biblioteca de guiones guardados
 let ANGLES  = [];       // angulos efimeros de la sesion actual
 let CURRENT = null;     // guion abierto en el modal
-const PILARES = ["Conoce al disenador","Identidad muy de aqui","Curaduria con criterio","Styling y guias","Colaboraciones/UGC","Founder y detras de camaras","Venta/eventos"];
+let BRIEF   = DEFAULT_BRIEF;                        // brief de la empresa (se carga de /api/brief)
+let PILARES = DEFAULT_BRIEF.pilares.slice();        // derivado del brief
+let BRAND_CONTEXT = briefToContext(DEFAULT_BRIEF);  // texto de contexto para los prompts
+
+function briefToContext(b){
+  const pil=(b.pilares||[]).map((p,i)=>(i+1)+') '+p).join(', ');
+  return `${b.nombre||''}: ${b.descripcion||''} Voz: ${b.voz||''} Audiencia: ${b.audiencia||''} Pilares: ${pil}. Reglas: ${b.reglas||''} Engagement: ${b.objetivo_engagement||''}`;
+}
 
 async function getToken(){ const { data } = await sb.auth.getSession(); return data.session?.access_token || null; }
 
@@ -254,12 +294,44 @@ async function boot(){
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('userEmail').textContent = data.session.user.email;
-  // poblar filtros de pilares (Tendencias y Produccion)
-  const fp = document.getElementById('fPilar');
-  const pp = document.getElementById('pPilar');
-  PILARES.forEach(p=>{ fp.appendChild(new Option(p,p)); pp.appendChild(new Option(p,p)); });
+  await loadBrief();      // define BRAND_CONTEXT + PILARES + puebla dropdowns + llena el form
   await loadTrends();
   await loadScripts();
+}
+
+// ───────── Brief de marca ─────────
+async function loadBrief(){
+  try{ const b=await api('/api/brief'); if(b && b.nombre) BRIEF=b; }
+  catch(e){ /* usa DEFAULT_BRIEF */ }
+  applyBrief();
+}
+function applyBrief(){
+  PILARES = (BRIEF.pilares&&BRIEF.pilares.length)?BRIEF.pilares.slice():DEFAULT_BRIEF.pilares.slice();
+  BRAND_CONTEXT = briefToContext(BRIEF);
+  populatePilarSelects();
+  fillBriefForm();
+}
+function populatePilarSelects(){
+  const opts=PILARES.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  const fp=document.getElementById('fPilar'); if(fp) fp.innerHTML='<option value="">Todos los pilares</option>'+opts;
+  const pp=document.getElementById('pPilar'); if(pp) pp.innerHTML='<option value="">Pilar (auto)</option>'+opts;
+}
+function fillBriefForm(){
+  const g=id=>document.getElementById(id); if(!g('bNombre')) return;
+  g('bNombre').value=BRIEF.nombre||''; g('bDesc').value=BRIEF.descripcion||'';
+  g('bVoz').value=BRIEF.voz||''; g('bAud').value=BRIEF.audiencia||'';
+  g('bPil').value=(BRIEF.pilares||[]).join('\n'); g('bReg').value=BRIEF.reglas||'';
+  g('bEng').value=BRIEF.objetivo_engagement||'';
+}
+async function saveBrief(){
+  const v=id=>document.getElementById(id).value.trim();
+  BRIEF={
+    nombre:v('bNombre'), descripcion:v('bDesc'), voz:v('bVoz'), audiencia:v('bAud'),
+    pilares:v('bPil').split('\n').map(x=>x.trim()).filter(Boolean),
+    reglas:v('bReg'), objetivo_engagement:v('bEng')
+  };
+  try{ await api('/api/brief',{method:'PUT',body:BRIEF}); applyBrief(); toast('Brief guardado. Ya alimenta tendencias y guiones.'); }
+  catch(e){ toast('Error: '+e.message); }
 }
 
 // ───────── Banco de Tendencias ─────────
@@ -538,6 +610,7 @@ function go(view){
   document.querySelectorAll('#sidebar nav a').forEach(a=>a.classList.toggle('active', a.dataset.view===view));
   document.querySelectorAll('#main > section').forEach(s=>s.classList.toggle('hidden', s.id!=='view-'+view));
   if(view==='prod') refreshTrendPicker();
+  if(view==='brief') fillBriefForm();
 }
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmt(n){ n=+n; return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':n; }

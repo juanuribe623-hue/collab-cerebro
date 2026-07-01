@@ -33,6 +33,7 @@ app.use(express.json({ limit: '30mb' }));
 app.use(express.static('public'));
 
 // Rutas de contenido (se iran sumando: brandfit, calendar, insights)
+app.use('/api/brief',   require('./routes/brief'));
 app.use('/api/trends',  require('./routes/trends'));
 app.use('/api/scripts', require('./routes/scripts'));
 app.use('/',            require('./routes/proxy'));   // /claude y /apify

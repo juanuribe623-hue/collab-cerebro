@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS content_scripts (
 );
 CREATE INDEX IF NOT EXISTS idx_content_scripts_company ON content_scripts (company_id);
 
+-- Brief de marca por empresa (contexto que alimenta todos los modulos). Uno por company.
+-- data: { nombre, descripcion, voz, audiencia, pilares[], reglas, objetivo_engagement }
+CREATE TABLE IF NOT EXISTS company_brief (
+  company_id UUID   PRIMARY KEY,
+  data       JSONB  NOT NULL DEFAULT '{}'::jsonb,
+  updated_at BIGINT NOT NULL DEFAULT 0
+);
+
 -- ───────────────────────────────────────────────────────────────────────────
 -- SEMBRAR EL PRIMER CLIENTE (Casa Precis)
 -- 1) Crear la empresa:
