@@ -398,38 +398,79 @@ async function saveTrends(){
   b.disabled=false; b.textContent='Guardar';
 }
 
-// Traer tendencias: version 1 (Claude). El wire de Apify (datos reales + videos) viene en el siguiente paso.
+// Helper: llamada a Claude que devuelve JSON parseado
+async function claudeJSON(sys,user,max){
+  const r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:max||1500,system:sys,messages:[{role:'user',content:user}]}});
+  return JSON.parse((r.content?.[0]?.text||'').replace(/```json|```/g,'').trim());
+}
+// Helper: videos reales de TikTok para un termino (con texto y hashtags para analisis)
+async function fetchTikTok(q){
+  const items=await api('/apify',{method:'POST',body:{
+    path:'/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items',
+    method:'POST',
+    body:{ searchQueries:[q], resultsPerPage:8, shouldDownloadVideos:false, shouldDownloadCovers:false, shouldDownloadSubtitles:false }
+  }});
+  return (items||[]).filter(v=>v && v.webVideoUrl)
+    .sort((a,b)=>(b.playCount||0)-(a.playCount||0))
+    .map(v=>({ url:v.webVideoUrl, plataforma:'tiktok', vistas:v.playCount||0, likes:v.diggCount||0,
+               desc:((v.text||'')+'').slice(0,120), hashtags:(v.hashtags||[]).map(h=>(h&&h.name)||h).filter(Boolean).slice(0,6) }));
+}
+const vidLite=({url,plataforma,vistas,likes})=>({url,plataforma,vistas,likes});
+
+// Traer tendencias v2: fuente REAL. Claude propone busquedas -> Apify trae videos reales -> Claude sintetiza.
 async function generarTendencias(){
-  const b=document.getElementById('genBtn'); b.disabled=true; b.textContent='Generando...';
+  const b=document.getElementById('genBtn'); b.disabled=true;
+  const restore=()=>{ b.disabled=false; b.textContent='Traer tendencias'; };
   try{
-    const sys = `Eres el motor de tendencias de una agencia de contenido. Identificas tendencias reales y actuales de redes en Colombia que sean afines a la marca. Responde SOLO un array JSON, sin texto extra.`;
-    const user = `Marca: ${BRAND_CONTEXT}\n\nGenera 6 tendencias afines (mezcla Instagram y TikTok), sin repetir las que ya existen: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}.\nCada objeto: { "titulo", "descripcion", "pilar" (uno de: ${PILARES.join(', ')}), "plataformas" (array con "instagram" y/o "tiktok"), "tipo": "tendencia", "tags" (array 2-4), "busqueda" (2 a 5 palabras en espanol para buscar ejemplos reales de la tendencia en TikTok) }.`;
-    const r = await api('/claude',{method:'POST',body:{ model:'claude-sonnet-4-6', max_tokens:1500, system:sys, messages:[{role:'user',content:user}] }});
-    let txt = (r.content?.[0]?.text||'').replace(/```json|```/g,'').trim();
-    const arr = JSON.parse(txt);
-    const now = Date.now();
-    arr.forEach(t=>{ t.id='trend_'+Math.random().toString(36).slice(2,10); t.estado='nueva'; t.fuente='claude'; t.creado_en=now; t.videos=t.videos||[]; });
-    TRENDS = [...arr, ...TRENDS];
-    renderTrends();
-    toast('Generadas '+arr.length+' tendencias. Recuerda Guardar.');
+    // 1) Claude: que buscar (desde el brief)
+    b.textContent='Pensando que buscar...';
+    const queries=(await claudeJSON(
+      `Generas terminos de busqueda para descubrir contenido REAL en TikTok afin a una marca. Respondes SOLO un array JSON de strings.`,
+      `Marca: ${BRAND_CONTEXT}\n\nDame 3 terminos de busqueda (2 a 4 palabras, en espanol, para Colombia) para encontrar contenido y tendencias reales afines a esta marca en TikTok. Evita repetir enfoques ya existentes: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}. Responde solo el array JSON de strings.`,
+      600)).slice(0,3);
+
+    // 2) Apify: videos reales por termino (en paralelo, tolerante a fallos)
+    b.textContent='Buscando videos reales en TikTok... (1 min aprox)';
+    const perQuery=await Promise.all(queries.map(q=>fetchTikTok(q).then(v=>({q,videos:v})).catch(()=>({q,videos:[]}))));
+    const totalVids=perQuery.reduce((n,pq)=>n+pq.videos.length,0);
+    const now=Date.now();
+    let arr;
+
+    if(totalVids>0){
+      // 3) Claude sintetiza desde lo que REALMENTE funciona
+      b.textContent='Analizando lo que funciona...';
+      const evidencia=perQuery.map((pq,i)=>`${i}) "${pq.q}": ${pq.videos.slice(0,6).map(v=>`[${v.vistas} vistas] ${v.desc||''} ${(v.hashtags||[]).map(h=>'#'+h).join(' ')}`).join(' || ')||'(sin resultados)'}`).join('\n');
+      arr=await claudeJSON(
+        `Eres analista de tendencias. A partir de VIDEOS REALES de TikTok (con vistas, texto y hashtags), identificas tendencias concretas y afines a la marca, sin inventar. Respondes SOLO un array JSON.`,
+        `Marca: ${BRAND_CONTEXT}\n\nEvidencia real de TikTok (numerada por termino):\n${evidencia}\n\nIdentifica 5 tendencias afines a la marca basadas en lo que REALMENTE esta funcionando arriba. Cada objeto: { "titulo","descripcion" (menciona el patron real que ves y por que aplica a la marca),"pilar" (uno de: ${PILARES.join(', ')}),"plataformas" (array con "tiktok" y/o "instagram"),"tipo":"tendencia","tags" (array 2-4),"busqueda" (2-5 palabras para reencontrar ejemplos),"q_index" (numero del termino en el que te basaste) }. Reglas: prohibido em-dash.`,
+        2000);
+      arr.forEach(t=>{ const src=perQuery[t.q_index]; t.videos=((src&&src.videos)||[]).slice(0,2).map(vidLite); t.fuente='apify+claude'; delete t.q_index; });
+    }else{
+      // Fallback: Apify no respondio (intermitencia). Claude solo.
+      b.textContent='Redes lentas, generando igual...';
+      arr=await claudeJSON(
+        `Eres el motor de tendencias de una agencia de contenido. Identificas tendencias reales y actuales de redes en Colombia afines a la marca. Respondes SOLO un array JSON.`,
+        `Marca: ${BRAND_CONTEXT}\n\nGenera 5 tendencias afines (mezcla Instagram y TikTok), sin repetir: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}. Cada objeto: { "titulo","descripcion","pilar" (uno de: ${PILARES.join(', ')}),"plataformas" (array),"tipo":"tendencia","tags" (array 2-4),"busqueda" (2-5 palabras) }. Prohibido em-dash.`,
+        1500);
+      arr.forEach(t=>{ t.fuente='claude'; t.videos=[]; });
+    }
+
+    arr.forEach(t=>{ t.id='trend_'+Math.random().toString(36).slice(2,10); t.estado='nueva'; t.creado_en=now; t.videos=t.videos||[]; });
+    TRENDS=[...arr,...TRENDS];
+    renderTrends(); persistTrends();
+    toast(totalVids>0 ? ('Generadas '+arr.length+' tendencias desde '+totalVids+' videos reales.')
+                      : ('Apify lento; generadas '+arr.length+' con Claude. Usa "Buscar en TikTok" en cada una.'));
   }catch(e){ toast('Error generando: '+e.message); }
-  b.disabled=false; b.textContent='Traer tendencias';
+  restore();
 }
 
-// Buscar ejemplos reales (TikTok) para una tendencia, via Apify
+// Buscar ejemplos reales (TikTok) para una tendencia puntual, via Apify
 async function buscarEjemplos(id, btn){
   const t=TRENDS.find(x=>x.id===id); if(!t) return;
   const q = t.busqueda || t.titulo || '';
   const orig = btn.textContent; btn.disabled=true; btn.textContent='Buscando... (30s aprox)';
   try{
-    const items = await api('/apify',{method:'POST',body:{
-      path:'/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items',
-      method:'POST',
-      body:{ searchQueries:[q], resultsPerPage:5, shouldDownloadVideos:false, shouldDownloadCovers:false, shouldDownloadSubtitles:false }
-    }});
-    const vids=(items||[]).filter(v=>v && v.webVideoUrl)
-      .sort((a,b)=>(b.playCount||0)-(a.playCount||0)).slice(0,2)
-      .map(v=>({ url:v.webVideoUrl, plataforma:'tiktok', vistas:v.playCount||0, likes:v.diggCount||0 }));
+    const vids=(await fetchTikTok(q)).slice(0,2).map(vidLite);
     t.videos = [...(t.videos||[]).filter(x=>x.plataforma!=='tiktok'), ...vids];
     renderTrends(); persistTrends();
     toast(vids.length ? ('TikTok: '+vids.length+' ejemplos.') : ('Sin ejemplos TikTok para "'+q+'".'));
