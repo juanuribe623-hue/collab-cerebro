@@ -594,8 +594,12 @@ async function saveTrends(){
   b.disabled=false; b.textContent='Guardar';
 }
 
+// Quita surrogates Unicode sueltos (emojis cortados) que rompen el JSON del request
+function stripSurrogates(s){ return ((s||'')+'').replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g,'').replace(/(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/g,'$1'); }
+
 // Helper: llamada a Claude que devuelve JSON parseado
 async function claudeJSON(sys,user,max){
+  sys=stripSurrogates(sys); user=stripSurrogates(user);
   let last;
   for(let attempt=0;attempt<2;attempt++){
     try{
@@ -1379,7 +1383,7 @@ async function fetchPostMetrics(url){
       body:{ postURLs:[url], resultsPerPage:1, shouldDownloadVideos:false, shouldDownloadCovers:false, shouldDownloadSubtitles:false }
     }});
     const v=items && items[0]; if(!v) return null;
-    return { plataforma:'tiktok', vistas:v.playCount||0, likes:v.diggCount||0, compartidos:v.shareCount||0, comentarios:v.commentCount||0, guardados:v.collectCount||0, titulo:((v.text||'')+'').slice(0,80), completo:true };
+    return { plataforma:'tiktok', vistas:v.playCount||0, likes:v.diggCount||0, compartidos:v.shareCount||0, comentarios:v.commentCount||0, guardados:v.collectCount||0, titulo:stripSurrogates(((v.text||'')+'').slice(0,80)), completo:true };
   }
   if(/instagram\.com/i.test(url)){
     const items=await api('/apify',{method:'POST',body:{
@@ -1388,7 +1392,7 @@ async function fetchPostMetrics(url){
     }});
     const p=items && items[0]; if(!p) return null;
     const views=p.videoViewCount||p.videoPlayCount||p.igPlayCount||p.playCount||p.viewsCount||0;
-    return { plataforma:'instagram', vistas:views, likes:p.likesCount||0, compartidos:0, comentarios:p.commentsCount||0, guardados:0, titulo:((p.caption||'')+'').slice(0,80), completo:false };
+    return { plataforma:'instagram', vistas:views, likes:p.likesCount||0, compartidos:0, comentarios:p.commentsCount||0, guardados:0, titulo:stripSurrogates(((p.caption||'')+'').slice(0,80)), completo:false };
   }
   return null;
 }
