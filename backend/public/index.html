@@ -121,6 +121,28 @@
   .bf-top{display:flex;gap:12px;align-items:center;margin-bottom:10px}
   .bf-top .who{font-weight:700;color:var(--navy);font-size:15px}
   .bf-top .sub2{font-size:12px;color:var(--gray);margin-top:2px}
+  /* desglose por criterio */
+  .crit{margin-bottom:14px}
+  .crit-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+  .crit-l{font-weight:700;color:var(--navy);font-size:13px}
+  .crit-s{font-weight:800;font-size:13px}
+  .crit-s.alto{color:var(--green)} .crit-s.medio{color:var(--amber)} .crit-s.bajo{color:#c0392b}
+  .crit-bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-bottom:5px}
+  .crit-fill{height:100%;border-radius:4px}
+  .crit-fill.alto{background:var(--green)} .crit-fill.medio{background:var(--amber)} .crit-fill.bajo{background:#c0392b}
+  .crit-x{font-size:12px;color:var(--gray);line-height:1.45}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0}
+  .chip{font-size:11px;font-weight:600;padding:4px 9px;border-radius:20px}
+  .chip.green{background:#EAF7EF;color:#14603a} .chip.amber{background:#FBF0DC;color:#8a5a12} .chip.red{background:#FBE7E7;color:#a02020}
+  .rec{border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.5;margin-top:6px}
+  .rec-t{font-weight:800;margin-bottom:4px}
+  .rec.rec-green{background:#EAF7EF;color:#14603a} .rec.rec-amber{background:#FBF0DC;color:#8a5a12} .rec.rec-red{background:#FBE7E7;color:#a02020}
+  /* sliders de pesos */
+  .peso-row{display:grid;grid-template-columns:200px 1fr 58px;align-items:center;gap:12px;margin-bottom:9px}
+  .peso-row label{font-size:13px;color:var(--slate)}
+  .peso-row input[type=range]{width:100%;accent-color:var(--green)}
+  .peso-row .pv{font-weight:700;color:var(--navy);text-align:right;font-size:13px}
+  .pesos-total{margin-top:10px;font-size:13px;color:var(--gray);text-align:right}
 </style>
 </head>
 <body>
@@ -266,6 +288,18 @@
         </div>
       </div>
       <div class="stage">
+        <div class="stage-t">Criterios y pesos (ajusta segun la marca)</div>
+        <div class="card" style="max-width:840px">
+          <div id="pesosRows"></div>
+          <div class="pesos-total">Total: <b id="pesosTotal">100</b> / 100 pts</div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn btn-primary" onclick="recalcularPesos()">Recalcular y guardar pesos</button>
+            <button class="btn btn-ghost" onclick="resetPesos()">Pesos por defecto</button>
+          </div>
+          <div class="hint" style="margin-top:8px">Los pesos se guardan en el Brief de la marca. Recalcular reaplica los scores sin volver a consultar redes.</div>
+        </div>
+      </div>
+      <div class="stage">
         <div class="stage-t">Evaluados</div>
         <div class="grid" id="bfGrid"><div class="empty">Aun no has evaluado creadores. Escribe un usuario y dale "Evaluar BrandFit".</div></div>
       </div>
@@ -284,6 +318,15 @@ let SCRIPTS = [];       // biblioteca de guiones guardados
 let ANGLES  = [];       // angulos efimeros de la sesion actual
 let CURRENT = null;     // guion abierto en el modal
 let INFLUENCERS = [];   // creadores evaluados (BrandFit)
+const BF_CRITERIOS=[
+  {key:'audiencia',   label:'Audiencia objetivo',           def:30},
+  {key:'credibilidad',label:'Credibilidad en la categoria', def:25},
+  {key:'tono',        label:'Tono y fit de marca',          def:20},
+  {key:'conflicto',   label:'Ausencia de conflicto',        def:15},
+  {key:'engagement',  label:'Calidad de engagement',        def:10},
+];
+function defaultPesos(){ const o={}; BF_CRITERIOS.forEach(c=>o[c.key]=c.def); return o; }
+let BF_PESOS = defaultPesos();
 let BRIEF   = DEFAULT_BRIEF;                        // brief de la empresa (se carga de /api/brief)
 let PILARES = DEFAULT_BRIEF.pilares.slice();        // derivado del brief
 let BRAND_CONTEXT = briefToContext(DEFAULT_BRIEF);  // texto de contexto para los prompts
@@ -337,8 +380,10 @@ async function loadBrief(){
 function applyBrief(){
   PILARES = (BRIEF.pilares&&BRIEF.pilares.length)?BRIEF.pilares.slice():DEFAULT_BRIEF.pilares.slice();
   BRAND_CONTEXT = briefToContext(BRIEF);
+  BF_PESOS = (BRIEF.brandfit_pesos && Object.keys(BRIEF.brandfit_pesos).length) ? {...defaultPesos(), ...BRIEF.brandfit_pesos} : defaultPesos();
   populatePilarSelects();
   fillBriefForm();
+  renderPesos();
 }
 function populatePilarSelects(){
   const opts=PILARES.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
@@ -355,6 +400,7 @@ function fillBriefForm(){
 async function saveBrief(){
   const v=id=>document.getElementById(id).value.trim();
   BRIEF={
+    ...BRIEF,
     nombre:v('bNombre'), descripcion:v('bDesc'), voz:v('bVoz'), audiencia:v('bAud'),
     pilares:v('bPil').split('\n').map(x=>x.trim()).filter(Boolean),
     reglas:v('bReg'), objetivo_engagement:v('bEng')
@@ -680,6 +726,42 @@ function closeModal(){ const m=document.getElementById('modal'); m.classList.add
 async function loadInfluencers(){ try{ INFLUENCERS=await api('/api/influencers'); }catch(e){} renderBrandFit(); }
 async function persistInfluencers(){ await api('/api/influencers',{method:'PUT',body:INFLUENCERS}); }
 
+function bfColor(pct){ return pct>=70?'alto':(pct>=45?'medio':'bajo'); }
+// Score ponderado a partir de los ratings por criterio y los pesos actuales (BF_PESOS)
+function computeScore(inf){
+  const cr=inf.criterios||{}; let acc=0, wsum=0; const puntos={};
+  BF_CRITERIOS.forEach(c=>{
+    const rating=Math.max(0,Math.min(100,(cr[c.key]&&cr[c.key].rating)||0));
+    const peso=BF_PESOS[c.key]||0;
+    puntos[c.key]=Math.round(rating/100*peso);
+    acc+=rating*peso; wsum+=peso;
+  });
+  return { score: wsum?Math.round(acc/wsum):0, puntos };
+}
+
+// ── Panel de pesos ──
+function renderPesos(){
+  const c=document.getElementById('pesosRows'); if(!c) return;
+  c.innerHTML=BF_CRITERIOS.map(cr=>`<div class="peso-row">
+    <label>${cr.label}</label>
+    <input type="range" min="0" max="60" value="${BF_PESOS[cr.key]}" oninput="onPesoInput('${cr.key}',this.value)">
+    <span class="pv" id="pv_${cr.key}">${BF_PESOS[cr.key]} pts</span>
+  </div>`).join('');
+  updatePesosTotal();
+}
+function onPesoInput(key,val){ BF_PESOS[key]=+val; const el=document.getElementById('pv_'+key); if(el) el.textContent=val+' pts'; updatePesosTotal(); }
+function updatePesosTotal(){
+  const t=BF_CRITERIOS.reduce((n,c)=>n+(BF_PESOS[c.key]||0),0);
+  const el=document.getElementById('pesosTotal'); if(el){ el.textContent=t; el.style.color=(t===100)?'var(--green)':'var(--terra)'; }
+}
+async function recalcularPesos(){
+  BRIEF.brandfit_pesos={...BF_PESOS};
+  try{ await api('/api/brief',{method:'PUT',body:BRIEF}); }catch(e){ toast('No pude guardar pesos: '+e.message); }
+  renderBrandFit();
+  toast('Pesos aplicados y guardados en el brief.');
+}
+function resetPesos(){ BF_PESOS=defaultPesos(); renderPesos(); }
+
 // Trae el perfil real del creador (TikTok o IG por handle; el perfil si es confiable, a diferencia del hashtag)
 async function fetchProfile(plat,handle){
   if(plat==='tiktok'){
@@ -689,16 +771,22 @@ async function fetchProfile(plat,handle){
     }});
     if(!items || !items.length) return null;
     const a=items[0].authorMeta||{};
-    return { nombre:a.nickName||handle, seguidores:a.fans||0, bio:a.signature||'',
-      muestras:items.slice(0,6).map(v=>({ texto:((v.text||'')+'').slice(0,110), vistas:v.playCount||0, likes:v.diggCount||0 })) };
+    const s=items.slice(0,8), fans=a.fans||0;
+    const avgL=s.length?s.reduce((n,v)=>n+(v.diggCount||0),0)/s.length:0;
+    return { nombre:a.nickName||handle, seguidores:fans, bio:a.signature||'', posts:a.video||s.length,
+      er:fans?+((avgL/fans*100).toFixed(2)):0,
+      muestras:s.slice(0,6).map(v=>({ texto:((v.text||'')+'').slice(0,110), vistas:v.playCount||0, likes:v.diggCount||0 })) };
   }else{
     const items=await api('/apify',{method:'POST',body:{
       path:'/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items', method:'POST',
       body:{ directUrls:['https://www.instagram.com/'+handle+'/'], resultsType:'details', resultsLimit:1, addParentData:false }
     }});
     const p=items && items[0]; if(!p) return null;
-    return { nombre:p.fullName||handle, seguidores:p.followersCount||0, bio:p.biography||'',
-      muestras:(p.latestPosts||[]).slice(0,6).map(x=>({ texto:((x.caption||'')+'').slice(0,110), likes:x.likesCount||0, vistas:x.videoViewCount||0 })) };
+    const posts=p.latestPosts||[], fol=p.followersCount||0;
+    const avgL=posts.length?posts.reduce((n,x)=>n+(x.likesCount||0),0)/posts.length:0;
+    return { nombre:p.fullName||handle, seguidores:fol, bio:p.biography||'', posts:p.postsCount||posts.length,
+      er:fol?+((avgL/fol*100).toFixed(2)):0,
+      muestras:posts.slice(0,6).map(x=>({ texto:((x.caption||'')+'').slice(0,110), likes:x.likesCount||0, vistas:x.videoViewCount||0 })) };
   }
 }
 
@@ -710,14 +798,15 @@ async function evaluarBrandFit(){
   try{
     const prof=await fetchProfile(plat,handle);
     if(!prof){ toast('No pude traer @'+handle+' en '+plat+'. Revisa el usuario.'); b.disabled=false; b.textContent='Evaluar BrandFit'; return; }
-    b.textContent='Evaluando fit con la marca...';
+    b.textContent='Evaluando fit por criterios...';
     const muestras=(prof.muestras||[]).map(m=>`"${m.texto||''}" (${m.vistas?fmt(m.vistas)+' vistas':fmt(m.likes||0)+' likes'})`).join(' || ');
-    const score=await claudeJSON(
-      `Eres experto en marketing de influencers. Evaluas el brand fit entre un creador y una marca con criterio y honestidad, incluyendo riesgos reales. Respondes SOLO un objeto JSON.`,
-      `Marca: ${BRAND_CONTEXT}\n\nCreador @${handle} (${plat}): ${prof.seguidores||0} seguidores. Bio: ${prof.bio||'(sin bio)'}. Muestras de contenido: ${muestras||'(sin muestras)'}.\n\nEvalua el brand fit. Devuelve objeto JSON: { "score" (numero 0-100), "veredicto" ("Alto"|"Medio"|"Bajo"), "alineacion" (array 2-4 razones concretas de por que encaja o no con la marca), "audiencia" (frase sobre que tan afin es su audiencia), "riesgos" (array 1-3 red flags o cosas a validar), "angulo_colab" (idea concreta de colaboracion afin a la marca), "formato" (formato sugerido) }. Se honesto: si no encaja, dilo claro. Prohibido em-dash.`,
-      1500);
+    const ev=await claudeJSON(
+      `Eres experto en marketing de influencers. Evaluas el brand fit entre un creador y una marca por criterios, con criterio y honestidad. Respondes SOLO un objeto JSON.`,
+      `Marca: ${BRAND_CONTEXT}\n\nCreador @${handle} (${plat}): ${prof.seguidores||0} seguidores, ${prof.posts||0} posts, engagement rate aprox ${prof.er||0}%. Bio: ${prof.bio||'(sin bio)'}. Muestras de contenido: ${muestras||'(sin muestras)'}.\n\nEvalua por estos 5 criterios, cada uno con un rating 0-100 (0 = nada afin, 100 = perfecto) y una explicacion breve basada en la evidencia:\n- audiencia: que tan afin es su audiencia al target de la marca\n- credibilidad: credibilidad y expertise en la categoria de la marca\n- tono: alineacion de tono y estetica con la voz de la marca\n- conflicto: ausencia de conflictos (colabs con competencia, controversias)\n- engagement: calidad real del engagement, no solo cantidad\n\nDevuelve objeto JSON: { "criterios": { "audiencia": {"rating":0-100,"explicacion":""}, "credibilidad": {"rating":0-100,"explicacion":""}, "tono": {"rating":0-100,"explicacion":""}, "conflicto": {"rating":0-100,"explicacion":""}, "engagement": {"rating":0-100,"explicacion":""} }, "pros": [2-4 strings cortos], "cautions": [1-3 strings cortos, a validar], "cons": [1-3 strings cortos, banderas rojas], "recomendacion": "Aprobar"|"Condicional"|"Descartar", "recomendacion_detalle": "parrafo accionable" }. Se honesto: si no encaja, dilo. Prohibido em-dash.`,
+      2200);
     const inf={ id:'inf_'+Math.random().toString(36).slice(2,10), handle, plataforma:plat,
-      nombre:prof.nombre||handle, seguidores:prof.seguidores||0, bio:prof.bio||'', ...score, evaluado_en:Date.now() };
+      nombre:prof.nombre||handle, seguidores:prof.seguidores||0, posts:prof.posts||0, er:prof.er||0, bio:prof.bio||'',
+      ...ev, evaluado_en:Date.now() };
     INFLUENCERS=[inf, ...INFLUENCERS.filter(x=>!(x.handle===handle && x.plataforma===plat))];
     await persistInfluencers();
     renderBrandFit(); openInfluencer(inf.id);
@@ -726,17 +815,20 @@ async function evaluarBrandFit(){
   b.disabled=false; b.textContent='Evaluar BrandFit';
 }
 
+function recBoxClass(rec){ const r=(rec||'').toLowerCase(); return r.includes('descart')?'rec-red':(r.includes('condi')?'rec-amber':'rec-green'); }
+function metaLine(i){ return `${esc(i.plataforma)} · ${fmt(i.seguidores||0)} seg${i.er?' · ER '+i.er+'%':''}${i.posts?' · '+fmt(i.posts)+' posts':''}`; }
+
 function renderBrandFit(){
   const g=document.getElementById('bfGrid'); if(!g) return;
   if(!INFLUENCERS.length){ g.innerHTML='<div class="empty">Aun no has evaluado creadores. Escribe un usuario y dale "Evaluar BrandFit".</div>'; return; }
   g.innerHTML=INFLUENCERS.map(i=>{
-    const v=(i.veredicto||'').toLowerCase();
+    const {score}=computeScore(i); const col=bfColor(score);
     return `<div class="card">
       <div class="bf-top">
-        <div class="score ${v}">${i.score!=null?i.score:'?'}</div>
-        <div><div class="who">@${esc(i.handle)}</div><div class="sub2">${esc(i.plataforma)} · ${fmt(i.seguidores||0)} seguidores · Fit ${esc(i.veredicto||'')}</div></div>
+        <div class="score ${col}">${score}</div>
+        <div><div class="who">@${esc(i.handle)}</div><div class="sub2">${metaLine(i)} · ${esc(i.recomendacion||'')}</div></div>
       </div>
-      <div class="desc">${esc((i.alineacion||[])[0]||'')}</div>
+      <div class="desc">${esc(i.recomendacion_detalle||(i.criterios&&i.criterios.audiencia&&i.criterios.audiencia.explicacion)||'')}</div>
       <button class="btn btn-ghost" onclick="openInfluencer('${i.id}')">Ver evaluacion</button>
     </div>`;
   }).join('');
@@ -744,18 +836,30 @@ function renderBrandFit(){
 
 function openInfluencer(id){
   const i=INFLUENCERS.find(x=>x.id===id); if(!i) return;
-  const v=(i.veredicto||'').toLowerCase();
+  const {score,puntos}=computeScore(i); const col=bfColor(score); const cr=i.criterios||{};
+  const rows=BF_CRITERIOS.map(c=>{
+    const rating=Math.round((cr[c.key]&&cr[c.key].rating)||0); const rc=bfColor(rating); const peso=BF_PESOS[c.key]||0;
+    return `<div class="crit">
+      <div class="crit-h"><span class="crit-l">${c.label}</span><span class="crit-s ${rc}">${puntos[c.key]} / ${peso}</span></div>
+      <div class="crit-bar"><div class="crit-fill ${rc}" style="width:${rating}%"></div></div>
+      <div class="crit-x">${esc((cr[c.key]&&cr[c.key].explicacion)||'')}</div>
+    </div>`;
+  }).join('');
+  const chips=[
+    ...(i.pros||[]).map(x=>`<span class="chip green">${esc(x)}</span>`),
+    ...(i.cautions||[]).map(x=>`<span class="chip amber">${esc(x)}</span>`),
+    ...(i.cons||[]).map(x=>`<span class="chip red">${esc(x)}</span>`),
+  ].join('');
   const m=document.getElementById('modal');
   m.innerHTML=`<div class="modal-box">
-    <div class="modal-head"><h3>@${esc(i.handle)} · ${esc(i.plataforma)}</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-head">
+      <div class="bf-top" style="margin:0"><div class="score ${col}">${score}</div><div><div class="who">@${esc(i.handle)} · ${esc(i.plataforma)}</div><div class="sub2">${metaLine(i)}${i.nombre?' · '+esc(i.nombre):''}</div></div></div>
+      <button class="x" onclick="closeModal()">×</button>
+    </div>
     <div class="modal-body">
-      <div class="bf-top"><div class="score ${v}">${i.score!=null?i.score:'?'}</div><div><div class="who">Fit ${esc(i.veredicto||'')}</div><div class="sub2">${fmt(i.seguidores||0)} seguidores${i.nombre?' · '+esc(i.nombre):''}</div></div></div>
-      ${i.bio?`<div class="fld"><div class="fl">Bio</div><div class="fv">${esc(i.bio)}</div></div>`:''}
-      <div class="fld"><div class="fl">Alineacion con la marca</div>${(i.alineacion||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('')||'<div class="fv">-</div>'}</div>
-      <div class="fld"><div class="fl">Audiencia</div><div class="fv">${esc(i.audiencia||'')}</div></div>
-      <div class="fld"><div class="fl">Riesgos / a validar</div>${(i.riesgos||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('')||'<div class="fv">-</div>'}</div>
-      <div class="fld"><div class="fl">Angulo de colaboracion</div><div class="fv sharev">${esc(i.angulo_colab||'')}</div></div>
-      <div class="fld"><div class="fl">Formato sugerido</div><div class="fv">${esc(i.formato||'')}</div></div>
+      ${rows}
+      ${chips?`<div class="chips">${chips}</div>`:''}
+      <div class="rec ${recBoxClass(i.recomendacion)}"><div class="rec-t">Recomendacion: ${esc(i.recomendacion||'')}</div><div>${esc(i.recomendacion_detalle||'')}</div></div>
     </div>
     <div class="modal-foot"><button class="btn btn-ghost" onclick="borrarInfluencer('${i.id}')">Eliminar</button><button class="btn btn-primary" onclick="closeModal()">Cerrar</button></div>
   </div>`;
@@ -773,6 +877,7 @@ function go(view){
   document.querySelectorAll('#main > section').forEach(s=>s.classList.toggle('hidden', s.id!=='view-'+view));
   if(view==='prod') refreshTrendPicker();
   if(view==='brief') fillBriefForm();
+  if(view==='brandfit'){ renderPesos(); renderBrandFit(); }
 }
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmt(n){ n=+n; return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':n; }
