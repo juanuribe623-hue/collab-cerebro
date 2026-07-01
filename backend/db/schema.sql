@@ -87,6 +87,17 @@ CREATE TABLE IF NOT EXISTS agency_creators (
   UNIQUE (plataforma, handle)
 );
 
+-- Calendario de contenido por empresa
+-- data: { fecha (YYYY-MM-DD), titulo, pilar, plataforma, estado, script_id? }
+CREATE TABLE IF NOT EXISTS content_calendar (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID   NOT NULL,
+  cal_id     TEXT   NOT NULL,
+  data       JSONB  NOT NULL DEFAULT '{}'::jsonb,
+  updated_at BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_content_calendar_company ON content_calendar (company_id);
+
 -- ───────────────────────────────────────────────────────────────────────────
 -- SEMBRAR EL PRIMER CLIENTE (Casa Precis)
 -- 1) Crear la empresa:

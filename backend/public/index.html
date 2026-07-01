@@ -147,6 +147,25 @@
   .delta.up{color:var(--green)} .delta.down{color:#c0392b} .delta.flat{color:var(--gray)}
   .wl-metrics{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--gray);margin:8px 0 10px}
   .wl-metrics b{color:var(--slate)}
+  /* calendario */
+  .cal-nav{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .cal-nav .mlabel{font-weight:700;color:var(--navy);font-size:16px;min-width:180px;text-align:center}
+  .cal-nav button{padding:6px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--navy);font-weight:600}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .cal-dow{font-size:11px;font-weight:700;color:var(--gray);text-transform:uppercase;text-align:center;padding:4px 0}
+  .cal-cell{min-height:96px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px;overflow:hidden;cursor:pointer}
+  .cal-cell.blank{background:transparent;border:none;cursor:default}
+  .cal-cell.today{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue) inset}
+  .cal-daynum{font-size:11px;color:var(--gray);font-weight:600;margin-bottom:3px}
+  .cal-chip{font-size:10px;font-weight:600;color:#fff;padding:2px 5px;border-radius:4px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .balance{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:16px}
+  .bal-row{display:grid;grid-template-columns:210px 1fr 40px;align-items:center;gap:10px;margin-bottom:7px}
+  .bal-row .bl{font-size:12px;color:var(--slate)}
+  .bal-bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}
+  .bal-fill{height:100%;border-radius:4px}
+  .bal-row .bn{font-size:12px;text-align:right;font-weight:700;color:var(--navy)}
+  .bal-alert{background:#FBE7E7;color:#a02020;border-radius:6px;padding:8px 10px;font-size:12px;margin-top:8px}
+  .bal-ok{background:#EAF7EF;color:#14603a;border-radius:6px;padding:8px 10px;font-size:12px;margin-top:8px}
 </style>
 </head>
 <body>
@@ -193,7 +212,7 @@
       <a data-view="brandfit" onclick="go('brandfit')">Influencers / BrandFit</a>
       <a data-view="radar" onclick="go('radar')">Radar emergentes</a>
       <a data-view="watchlist" onclick="go('watchlist')">Watchlist</a>
-      <a class="soon">Calendario</a>
+      <a data-view="cal" onclick="go('cal')">Calendario</a>
       <a class="soon">Insights</a>
     </nav>
     <div class="user">
@@ -343,6 +362,25 @@
       </div>
       <div class="grid" id="wlGrid"><div class="empty">Aun no sigues a nadie. Agrega creadores desde el Radar o desde BrandFit.</div></div>
     </section>
+
+    <!-- CALENDARIO -->
+    <section id="view-cal" class="hidden">
+      <div class="head">
+        <div>
+          <h2>Calendario</h2>
+          <div class="sub">Programa tu contenido por pilar. Las alarmas te avisan si descuidas algun pilar de la marca.</div>
+        </div>
+        <button class="btn btn-primary" onclick="nuevoEntry('')">Agregar contenido</button>
+      </div>
+      <div id="balance" class="balance"></div>
+      <div class="cal-nav">
+        <button onclick="calPrev()">‹</button>
+        <span class="mlabel" id="calLabel"></span>
+        <button onclick="calNext()">›</button>
+        <button onclick="calHoy()">Hoy</button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+    </section>
   </main>
 </div>
 
@@ -359,6 +397,8 @@ let CURRENT = null;     // guion abierto en el modal
 let INFLUENCERS = [];   // creadores evaluados (BrandFit)
 let RADAR = [];         // creadores emergentes descubiertos (efimero en v1)
 let WATCHLIST = [];     // creadores en seguimiento (con snapshots)
+let CALENDAR = [];      // piezas del calendario de contenido
+let calYear, calMonth;  // mes visible
 const BF_CRITERIOS=[
   {key:'audiencia',   label:'Audiencia objetivo',           def:30},
   {key:'credibilidad',label:'Credibilidad en la categoria', def:25},
@@ -411,6 +451,7 @@ async function boot(){
   await loadScripts();
   await loadInfluencers();
   await loadWatchlist();
+  await loadCalendar();
 }
 
 // ───────── Brief de marca ─────────
@@ -1091,6 +1132,108 @@ async function quitarWatchlist(id){
   renderWatchlist(); toast('Quitado del watchlist.');
 }
 
+// ───────── Calendario ─────────
+const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const DOW=['Lun','Mar','Mie','Jue','Vie','Sab','Dom'];
+const PIL_COLORS=['#1E3A8A','#B5613B','#3C5148','#8a5a12','#2C5282','#7A4B8A','#1B8A4B','#9A6A1A'];
+function pilColor(pilar){ const i=PILARES.indexOf(pilar); return PIL_COLORS[(i<0?0:i)%PIL_COLORS.length]; }
+function ymd(y,m,d){ return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'); }
+
+async function loadCalendar(){
+  try{ CALENDAR=await api('/api/calendar'); }catch(e){}
+  const d=new Date(); calYear=d.getFullYear(); calMonth=d.getMonth();
+  renderCalendar();
+}
+async function persistCalendar(){ await api('/api/calendar',{method:'PUT',body:CALENDAR}); }
+
+function renderCalendar(){
+  renderBalance();
+  const label=document.getElementById('calLabel'); if(label) label.textContent=MESES[calMonth]+' '+calYear;
+  const grid=document.getElementById('calGrid'); if(!grid) return;
+  let html=DOW.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  const firstDow=(new Date(calYear,calMonth,1).getDay()+6)%7; // Lun=0
+  const days=new Date(calYear,calMonth+1,0).getDate();
+  const t=new Date(); const tStr=ymd(t.getFullYear(),t.getMonth(),t.getDate());
+  for(let i=0;i<firstDow;i++) html+=`<div class="cal-cell blank"></div>`;
+  for(let d=1;d<=days;d++){
+    const ds=ymd(calYear,calMonth,d);
+    const chips=CALENDAR.filter(e=>e.fecha===ds).map(e=>`<div class="cal-chip" style="background:${pilColor(e.pilar)}" onclick="event.stopPropagation();openEntry('${e.id}')" title="${esc(e.titulo)} · ${esc(e.pilar||'')}">${esc(e.titulo)}</div>`).join('');
+    html+=`<div class="cal-cell${ds===tStr?' today':''}" onclick="nuevoEntry('${ds}')"><div class="cal-daynum">${d}</div>${chips}</div>`;
+  }
+  grid.innerHTML=html;
+}
+
+function renderBalance(){
+  const el=document.getElementById('balance'); if(!el) return;
+  const prefix=calYear+'-'+String(calMonth+1).padStart(2,'0');
+  const items=CALENDAR.filter(e=>(e.fecha||'').startsWith(prefix));
+  const counts={}; PILARES.forEach(p=>counts[p]=0);
+  items.forEach(e=>{ if(counts[e.pilar]==null) counts[e.pilar]=0; counts[e.pilar]++; });
+  const max=Math.max(1,...PILARES.map(p=>counts[p]||0));
+  const rows=PILARES.map(p=>{
+    const n=counts[p]||0; const w=Math.round((n/max)*100); const col=n===0?'#d9a0a0':pilColor(p);
+    return `<div class="bal-row"><span class="bl">${esc(p)}</span><div class="bal-bar"><div class="bal-fill" style="width:${w}%;background:${col}"></div></div><span class="bn" style="${n===0?'color:#c0392b':''}">${n}</span></div>`;
+  }).join('');
+  const vacios=PILARES.filter(p=>(counts[p]||0)===0);
+  let alert;
+  if(!items.length) alert=`<div class="bal-alert">Mes sin contenido planeado. Programa piezas equilibrando los pilares.</div>`;
+  else if(vacios.length) alert=`<div class="bal-alert">Pilares sin contenido este mes: ${vacios.map(esc).join(', ')}. Balancea para no descuidar la marca.</div>`;
+  else alert=`<div class="bal-ok">Todos los pilares tienen contenido este mes. Buen balance.</div>`;
+  el.innerHTML=`<div class="stage-t">Balance de pilares · ${MESES[calMonth]} ${calYear} · ${items.length} pieza(s)</div>${rows}${alert}`;
+}
+
+function calPrev(){ calMonth--; if(calMonth<0){ calMonth=11; calYear--; } renderCalendar(); }
+function calNext(){ calMonth++; if(calMonth>11){ calMonth=0; calYear++; } renderCalendar(); }
+function calHoy(){ const d=new Date(); calYear=d.getFullYear(); calMonth=d.getMonth(); renderCalendar(); }
+
+function nuevoEntry(fecha){ entryModal({ fecha:fecha||'', pilar:PILARES[0]||'', plataforma:'instagram', estado:'idea' }); }
+function openEntry(id){ const e=CALENDAR.find(x=>x.id===id); if(e) entryModal(e); }
+function entryModal(e){
+  const isNew=!e.id;
+  const pilOpts=PILARES.map(p=>`<option ${e.pilar===p?'selected':''}>${esc(p)}</option>`).join('');
+  const scrOpts=SCRIPTS.map(s=>`<option value="${s.id}">${esc(s.titulo||'')}</option>`).join('');
+  const plats=['instagram','tiktok','ambas'].map(p=>`<option ${e.plataforma===p?'selected':''}>${p}</option>`).join('');
+  const ests=[['idea','Idea'],['produccion','En produccion'],['listo','Listo'],['publicado','Publicado']].map(x=>`<option value="${x[0]}" ${e.estado===x[0]?'selected':''}>${x[1]}</option>`).join('');
+  const m=document.getElementById('modal');
+  m.innerHTML=`<div class="modal-box" style="max-width:520px">
+    <div class="modal-head"><h3>${isNew?'Nueva pieza':'Editar pieza'}</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      ${SCRIPTS.length?`<div class="bf"><label>Desde un guion guardado (opcional)</label><select id="eScript" onchange="prefillFromScript()"><option value="">-</option>${scrOpts}</select></div>`:''}
+      <div class="bf"><label>Fecha</label><input type="date" id="eFecha" value="${e.fecha||''}" /></div>
+      <div class="bf"><label>Titulo</label><input id="eTitulo" value="${esc(e.titulo||'')}" /></div>
+      <div class="bf"><label>Pilar</label><select id="ePilar">${pilOpts}</select></div>
+      <div class="bf"><label>Plataforma</label><select id="ePlat">${plats}</select></div>
+      <div class="bf"><label>Estado</label><select id="eEstado">${ests}</select></div>
+    </div>
+    <div class="modal-foot">
+      ${isNew?'':('<button class="btn btn-ghost" onclick="deleteEntry(\''+e.id+'\')">Eliminar</button>')}
+      <button class="btn btn-primary" onclick="saveEntry('${e.id||''}')">Guardar</button>
+    </div>
+  </div>`;
+  m.classList.remove('hidden');
+}
+function prefillFromScript(){
+  const s=SCRIPTS.find(x=>x.id===document.getElementById('eScript').value); if(!s) return;
+  document.getElementById('eTitulo').value=s.titulo||'';
+  if(s.pilar && PILARES.includes(s.pilar)) document.getElementById('ePilar').value=s.pilar;
+  if(s.plataformas&&s.plataformas.length) document.getElementById('ePlat').value=(s.plataformas.length>1?'ambas':s.plataformas[0]);
+}
+async function saveEntry(id){
+  const val=x=>document.getElementById(x).value;
+  const fecha=val('eFecha'); if(!fecha){ toast('Elige una fecha.'); return; }
+  const obj={ id:id||('cal_'+Math.random().toString(36).slice(2,10)), fecha,
+    titulo:(val('eTitulo').trim()||'(sin titulo)'), pilar:val('ePilar'), plataforma:val('ePlat'), estado:val('eEstado') };
+  const sc=document.getElementById('eScript'); if(sc&&sc.value) obj.script_id=sc.value;
+  CALENDAR = id ? CALENDAR.map(e=>e.id===id?obj:e) : [...CALENDAR,obj];
+  try{ await persistCalendar(); }catch(e){ toast('Error: '+e.message); }
+  closeModal(); renderCalendar(); toast('Guardado.');
+}
+async function deleteEntry(id){
+  CALENDAR=CALENDAR.filter(e=>e.id!==id);
+  try{ await persistCalendar(); }catch(e){}
+  closeModal(); renderCalendar(); toast('Eliminado.');
+}
+
 // ───────── util ─────────
 function go(view){
   document.querySelectorAll('#sidebar nav a').forEach(a=>a.classList.toggle('active', a.dataset.view===view));
@@ -1100,6 +1243,7 @@ function go(view){
   if(view==='brandfit'){ renderPesos(); renderBrandFit(); }
   if(view==='radar') renderRadar();
   if(view==='watchlist') renderWatchlist();
+  if(view==='cal') renderCalendar();
 }
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmt(n){ n=+n; return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':n; }
