@@ -98,6 +98,17 @@ CREATE TABLE IF NOT EXISTS content_calendar (
 );
 CREATE INDEX IF NOT EXISTS idx_content_calendar_company ON content_calendar (company_id);
 
+-- Insights: publicaciones registradas y su performance (guardados/compartidos), por empresa
+-- data: { titulo, pilar, plataforma, formato, fecha, vistas, guardados, compartidos, likes, comentarios }
+CREATE TABLE IF NOT EXISTS content_insights (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID   NOT NULL,
+  ins_id     TEXT   NOT NULL,
+  data       JSONB  NOT NULL DEFAULT '{}'::jsonb,
+  updated_at BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_content_insights_company ON content_insights (company_id);
+
 -- ───────────────────────────────────────────────────────────────────────────
 -- SEMBRAR EL PRIMER CLIENTE (Casa Precis)
 -- 1) Crear la empresa:

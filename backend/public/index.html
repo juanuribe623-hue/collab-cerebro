@@ -166,6 +166,12 @@
   .bal-row .bn{font-size:12px;text-align:right;font-weight:700;color:var(--navy)}
   .bal-alert{background:#FBE7E7;color:#a02020;border-radius:6px;padding:8px 10px;font-size:12px;margin-top:8px}
   .bal-ok{background:#EAF7EF;color:#14603a;border-radius:6px;padding:8px 10px;font-size:12px;margin-top:8px}
+  /* insights */
+  .ins-rates{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--gray);margin:8px 0}
+  .ins-rates b{color:var(--green);font-size:14px}
+  .ins-rank{display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)}
+  .ins-rank b{color:var(--navy)}
+  #hookIn{width:100%;min-height:70px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:13px;margin-bottom:10px;resize:vertical}
 </style>
 </head>
 <body>
@@ -213,7 +219,7 @@
       <a data-view="radar" onclick="go('radar')">Radar emergentes</a>
       <a data-view="watchlist" onclick="go('watchlist')">Watchlist</a>
       <a data-view="cal" onclick="go('cal')">Calendario</a>
-      <a class="soon">Insights</a>
+      <a data-view="insights" onclick="go('insights')">Insights</a>
     </nav>
     <div class="user">
       <div id="userEmail"></div>
@@ -381,6 +387,31 @@
       </div>
       <div class="cal-grid" id="calGrid"></div>
     </section>
+
+    <!-- INSIGHTS -->
+    <section id="view-insights" class="hidden">
+      <div class="head">
+        <div>
+          <h2>Insights</h2>
+          <div class="sub">Que esta funcionando para guardados y compartidos, y como mejorar los hooks.</div>
+        </div>
+        <button class="btn btn-primary" onclick="insModal({})">Registrar publicacion</button>
+      </div>
+      <div id="insStats" class="balance"></div>
+      <div id="insAnalysis"></div>
+      <div class="stage">
+        <div class="stage-t">Publicaciones registradas</div>
+        <div class="grid" id="insGrid"><div class="empty">Registra publicaciones con sus metricas para ver que genera guardados y compartidos.</div></div>
+      </div>
+      <div class="stage">
+        <div class="stage-t">Optimizador de hooks</div>
+        <div class="card" style="max-width:840px">
+          <textarea id="hookIn" placeholder="Pega un hook (los primeros 3 segundos) y te digo su potencial de guardado/compartido + variantes mas fuertes."></textarea>
+          <button class="btn btn-primary" onclick="optimizarHook()" id="hookBtn">Analizar hook</button>
+          <div id="hookOut"></div>
+        </div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -399,6 +430,7 @@ let RADAR = [];         // creadores emergentes descubiertos (efimero en v1)
 let WATCHLIST = [];     // creadores en seguimiento (con snapshots)
 let CALENDAR = [];      // piezas del calendario de contenido
 let calYear, calMonth;  // mes visible
+let INSIGHTS = [];      // publicaciones registradas con performance
 const BF_CRITERIOS=[
   {key:'audiencia',   label:'Audiencia objetivo',           def:30},
   {key:'credibilidad',label:'Credibilidad en la categoria', def:25},
@@ -452,6 +484,7 @@ async function boot(){
   await loadInfluencers();
   await loadWatchlist();
   await loadCalendar();
+  await loadInsights();
 }
 
 // ───────── Brief de marca ─────────
@@ -1234,6 +1267,128 @@ async function deleteEntry(id){
   closeModal(); renderCalendar(); toast('Eliminado.');
 }
 
+// ───────── Insights ─────────
+async function loadInsights(){ try{ INSIGHTS=await api('/api/insights'); }catch(e){} renderInsights(); }
+async function persistInsights(){ await api('/api/insights',{method:'PUT',body:INSIGHTS}); }
+
+function rankBy(field){
+  const g={};
+  INSIGHTS.forEach(p=>{ const v=p.vistas||0; if(!v) return; const k=p[field]||'(sin dato)';
+    g[k]=g[k]||{sum:0,n:0}; g[k].sum+=((p.guardados||0)+(p.compartidos||0))/v; g[k].n++; });
+  return Object.entries(g).map(([k,o])=>({k, rate:o.sum/o.n, n:o.n})).sort((a,b)=>b.rate-a.rate);
+}
+
+function renderInsights(){
+  const grid=document.getElementById('insGrid'); const stats=document.getElementById('insStats'); if(!grid) return;
+  if(!INSIGHTS.length){
+    grid.innerHTML='<div class="empty">Registra publicaciones con sus metricas para ver que genera guardados y compartidos.</div>';
+    if(stats) stats.innerHTML='<div class="stage-t">Analisis</div><div class="empty" style="padding:20px">Aun sin datos. Registra publicaciones para analizar.</div>';
+    return;
+  }
+  const byP=rankBy('pilar'), byF=rankBy('formato');
+  const totV=INSIGHTS.reduce((n,p)=>n+(p.vistas||0),0);
+  const totGS=INSIGHTS.reduce((n,p)=>n+(p.guardados||0)+(p.compartidos||0),0);
+  const rate=totV?((totGS/totV)*100).toFixed(2):'0';
+  if(stats){
+    stats.innerHTML=`<div class="stage-t">Analisis · ${INSIGHTS.length} publicacion(es)</div>
+      <div class="ins-rates"><span>Tasa de valor (guardados + compartidos / vistas): <b>${rate}%</b></span></div>
+      <div style="margin:8px 0"><div class="fl">Mejor pilar para guardados + compartidos</div>${byP.slice(0,3).map(r=>`<div class="ins-rank"><span>${esc(r.k)} <span style="color:var(--gray)">(${r.n})</span></span><b>${(r.rate*100).toFixed(2)}%</b></div>`).join('')||'-'}</div>
+      <div style="margin:8px 0"><div class="fl">Mejor formato</div>${byF.slice(0,3).map(r=>`<div class="ins-rank"><span>${esc(r.k)} <span style="color:var(--gray)">(${r.n})</span></span><b>${(r.rate*100).toFixed(2)}%</b></div>`).join('')||'-'}</div>
+      <button class="btn btn-primary" onclick="analizarInsights()" id="insAnBtn" style="margin-top:8px">Analizar con IA y recomendar</button>`;
+  }
+  grid.innerHTML=INSIGHTS.map(p=>{
+    const v=p.vistas||0; const sr=v?((p.guardados||0)/v*100).toFixed(2):'0'; const shr=v?((p.compartidos||0)/v*100).toFixed(2):'0';
+    return `<div class="card">
+      <div class="badges"><span class="badge b-pilar">${esc(p.pilar||'')}</span>${p.plataforma?`<span class="badge b-plat">${esc(p.plataforma)}</span>`:''}${p.formato?`<span class="badge b-tag">${esc(p.formato)}</span>`:''}</div>
+      <h3>${esc(p.titulo||'')}</h3>
+      <div class="ins-rates"><span>Guardados <b>${sr}%</b></span><span>Compartidos <b>${shr}%</b></span></div>
+      <div class="desc">${fmt(p.vistas||0)} vistas · ${fmt(p.guardados||0)} guard · ${fmt(p.compartidos||0)} comp · ${fmt(p.likes||0)} likes</div>
+      <button class="btn btn-ghost" onclick="openInsight('${p.id}')">Editar</button>
+    </div>`;
+  }).join('');
+}
+function openInsight(id){ const p=INSIGHTS.find(x=>x.id===id); if(p) insModal(p); }
+
+function insModal(e){
+  e=e||{}; const isNew=!e.id;
+  const pilOpts=PILARES.map(p=>`<option ${e.pilar===p?'selected':''}>${esc(p)}</option>`).join('');
+  const plats=['instagram','tiktok'].map(p=>`<option ${e.plataforma===p?'selected':''}>${p}</option>`).join('');
+  const num=(id,v)=>`<input type="number" min="0" id="${id}" value="${v||0}" />`;
+  const m=document.getElementById('modal');
+  m.innerHTML=`<div class="modal-box" style="max-width:560px">
+    <div class="modal-head"><h3>${isNew?'Registrar publicacion':'Editar publicacion'}</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="bf"><label>Titulo</label><input id="iTitulo" value="${esc(e.titulo||'')}" /></div>
+      <div class="bf"><label>Pilar</label><select id="iPilar">${pilOpts}</select></div>
+      <div class="bf"><label>Plataforma</label><select id="iPlat">${plats}</select></div>
+      <div class="bf"><label>Formato</label><input id="iFormato" value="${esc(e.formato||'')}" placeholder="ej: Reel, GRWM, voz en off" /></div>
+      <div class="bf"><label>Fecha</label><input type="date" id="iFecha" value="${e.fecha||''}" /></div>
+      <div class="plats">
+        <div class="bf"><label>Vistas</label>${num('iVistas',e.vistas)}</div>
+        <div class="bf"><label>Guardados</label>${num('iGuard',e.guardados)}</div>
+        <div class="bf"><label>Compartidos</label>${num('iComp',e.compartidos)}</div>
+        <div class="bf"><label>Likes</label>${num('iLikes',e.likes)}</div>
+        <div class="bf"><label>Comentarios</label>${num('iComent',e.comentarios)}</div>
+      </div>
+    </div>
+    <div class="modal-foot">${isNew?'':('<button class="btn btn-ghost" onclick="deleteInsight(\''+e.id+'\')">Eliminar</button>')}<button class="btn btn-primary" onclick="saveInsight('${e.id||''}')">Guardar</button></div>
+  </div>`;
+  m.classList.remove('hidden');
+}
+async function saveInsight(id){
+  const v=x=>document.getElementById(x).value; const n=x=>+document.getElementById(x).value||0;
+  const obj={ id:id||('ins_'+Math.random().toString(36).slice(2,10)),
+    titulo:(v('iTitulo').trim()||'(sin titulo)'), pilar:v('iPilar'), plataforma:v('iPlat'), formato:v('iFormato').trim(), fecha:v('iFecha'),
+    vistas:n('iVistas'), guardados:n('iGuard'), compartidos:n('iComp'), likes:n('iLikes'), comentarios:n('iComent') };
+  INSIGHTS = id ? INSIGHTS.map(x=>x.id===id?obj:x) : [obj,...INSIGHTS];
+  try{ await persistInsights(); }catch(e){ toast('Error: '+e.message); }
+  closeModal(); renderInsights(); toast('Guardado.');
+}
+async function deleteInsight(id){
+  INSIGHTS=INSIGHTS.filter(x=>x.id!==id);
+  try{ await persistInsights(); }catch(e){}
+  closeModal(); renderInsights(); toast('Eliminado.');
+}
+
+async function analizarInsights(){
+  if(!INSIGHTS.length){ toast('Registra publicaciones primero.'); return; }
+  const b=document.getElementById('insAnBtn'); if(b){ b.disabled=true; b.textContent='Analizando...'; }
+  try{
+    const datos=INSIGHTS.map(p=>{ const v=p.vistas||0; return `"${p.titulo}" [${p.pilar}/${p.formato||'?'}/${p.plataforma||'?'}] vistas ${v}, guardados ${p.guardados||0} (${v?((p.guardados||0)/v*100).toFixed(1):0}%), compartidos ${p.compartidos||0} (${v?((p.compartidos||0)/v*100).toFixed(1):0}%), likes ${p.likes||0}`; }).join('\n');
+    const r=await claudeJSON(
+      `Eres analista de contenido. La marca optimiza para GUARDADOS y COMPARTIDOS (no likes). Analizas performance real y das recomendaciones accionables. Respondes SOLO un objeto JSON.`,
+      `Marca: ${BRAND_CONTEXT}\n\nPublicaciones y su performance:\n${datos}\n\nAnaliza que genera guardados y compartidos. Devuelve JSON: { "patrones": [3-4 patrones concretos que ves en los datos], "recomendaciones": [3-5 acciones concretas para subir guardados/compartidos], "prioridad": "la accion numero 1 a hacer ya", "pilar_formato": "que pilar y formato duplicar" }. Basate en los datos, no inventes. Prohibido em-dash.`,
+      1500);
+    document.getElementById('insAnalysis').innerHTML=`<div class="card" style="margin-bottom:16px">
+      <div class="stage-t">Analisis IA</div>
+      <div class="fld"><div class="fl">Patrones</div>${(r.patrones||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('')}</div>
+      <div class="fld"><div class="fl">Recomendaciones</div>${(r.recomendaciones||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('')}</div>
+      <div class="fld"><div class="fl">Prioridad ya</div><div class="fv sharev">${esc(r.prioridad||'')}</div></div>
+      <div class="fld"><div class="fl">Pilar y formato a duplicar</div><div class="fv">${esc(r.pilar_formato||'')}</div></div>
+    </div>`;
+  }catch(e){ toast('Error analizando: '+e.message); }
+  if(b){ b.disabled=false; b.textContent='Analizar con IA y recomendar'; }
+}
+
+async function optimizarHook(){
+  const hook=document.getElementById('hookIn').value.trim();
+  if(!hook){ toast('Pega un hook.'); return; }
+  const b=document.getElementById('hookBtn'); b.disabled=true; b.textContent='Analizando...';
+  try{
+    const r=await claudeJSON(
+      `Eres experto en hooks de video corto. La marca optimiza para guardados y compartidos. Evaluas y mejoras hooks. Respondes SOLO un objeto JSON.`,
+      `Marca: ${BRAND_CONTEXT}\n\nHook: "${hook}"\n\nDevuelve JSON: { "score" (0-100, potencial de guardado/compartido), "razon" (por que ese score), "mejoras" (2-3 tips concretos), "variantes" (3 hooks alternativos mas fuertes, espanol colombiano natural) }. Prohibido em-dash.`,
+      1200);
+    const col=r.score>=70?'alto':(r.score>=45?'medio':'bajo');
+    document.getElementById('hookOut').innerHTML=`<div style="margin-top:14px">
+      <div class="bf-top"><div class="score ${col}">${r.score!=null?r.score:'?'}</div><div><div class="who">Potencial guardado/compartido</div><div class="sub2">${esc(r.razon||'')}</div></div></div>
+      <div class="fld"><div class="fl">Mejoras</div>${(r.mejoras||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('')}</div>
+      <div class="fld"><div class="fl">Variantes mas fuertes</div>${(r.variantes||[]).map(x=>`<div class="gbeat"><div class="gtexto">${esc(x)}</div></div>`).join('')}</div>
+    </div>`;
+  }catch(e){ toast('Error: '+e.message); }
+  b.disabled=false; b.textContent='Analizar hook';
+}
+
 // ───────── util ─────────
 function go(view){
   document.querySelectorAll('#sidebar nav a').forEach(a=>a.classList.toggle('active', a.dataset.view===view));
@@ -1244,6 +1399,7 @@ function go(view){
   if(view==='radar') renderRadar();
   if(view==='watchlist') renderWatchlist();
   if(view==='cal') renderCalendar();
+  if(view==='insights') renderInsights();
 }
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmt(n){ n=+n; return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':n; }
