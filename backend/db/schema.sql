@@ -31,6 +31,20 @@ CREATE TABLE IF NOT EXISTS content_trends (
 );
 CREATE INDEX IF NOT EXISTS idx_content_trends_company ON content_trends (company_id);
 
+-- Biblioteca de Guiones producidos (Modulo Produccion: angulos -> guiones), por empresa
+-- data: { titulo, angulo, pilar, tema, plataformas[],
+--         ig:     { hook, desarrollo[], cierre, caption, hashtags[], cta },
+--         tiktok: { hook, desarrollo[], cierre, caption, hashtags[], audio, cta },
+--         utm, creado_en }
+CREATE TABLE IF NOT EXISTS content_scripts (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID   NOT NULL,
+  script_id  TEXT   NOT NULL,
+  data       JSONB  NOT NULL DEFAULT '{}'::jsonb,
+  updated_at BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_content_scripts_company ON content_scripts (company_id);
+
 -- ───────────────────────────────────────────────────────────────────────────
 -- SEMBRAR EL PRIMER CLIENTE (Casa Precis)
 -- 1) Crear la empresa:

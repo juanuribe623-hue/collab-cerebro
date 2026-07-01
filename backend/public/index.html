@@ -75,6 +75,38 @@
   .empty{text-align:center;color:var(--gray);padding:60px 20px}
   .toast{position:fixed;bottom:20px;right:20px;background:var(--ink);color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;opacity:0;transition:.3s;z-index:50}
   .toast.show{opacity:1}
+
+  /* PRODUCCION */
+  .stage{margin-bottom:22px}
+  .stage-t{font-size:12px;font-weight:700;color:var(--terra);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px}
+  .ang-card{position:relative}
+  .ang-card .gancho{background:var(--pale);border-radius:8px;padding:9px 11px;font-size:13px;color:var(--navy);font-style:italic;margin-bottom:10px}
+  .ang-card .por{font-size:12px;color:var(--gray);line-height:1.4;margin-bottom:12px}
+  .ang-card .btn{width:100%}
+  /* MODAL */
+  .modal{position:fixed;inset:0;background:rgba(19,36,90,.55);display:flex;align-items:flex-start;justify-content:center;padding:34px 16px;overflow:auto;z-index:60}
+  .modal-box{background:#fff;border-radius:14px;width:100%;max-width:900px;box-shadow:0 24px 70px rgba(0,0,0,.3)}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;border-radius:14px 14px 0 0}
+  .modal-head h3{color:var(--navy);font-size:17px}
+  .modal-head .x{background:none;border:none;font-size:22px;color:var(--gray);line-height:1}
+  .modal-body{padding:20px 22px}
+  .modal-foot{display:flex;gap:10px;justify-content:flex-end;padding:14px 22px;border-top:1px solid var(--line)}
+  .plats{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:760px){.plats{grid-template-columns:1fr}}
+  .plat-block{border:1px solid var(--line);border-radius:11px;overflow:hidden}
+  .plat-block .ph{padding:10px 14px;font-weight:700;font-size:13px;color:#fff}
+  .plat-block.ig .ph{background:linear-gradient(90deg,#C13584,#E1306C)}
+  .plat-block.tt .ph{background:#111}
+  .plat-block .pb{padding:14px}
+  .fld{margin-bottom:12px}
+  .fld .fl{font-size:11px;font-weight:700;color:var(--gray);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+  .fld .fv{font-size:13px;line-height:1.5;color:var(--slate);white-space:pre-wrap}
+  .fld .hookv{background:#FFF7ED;border-left:3px solid var(--terra);padding:8px 10px;border-radius:4px;font-weight:600}
+  .beat{font-size:13px;line-height:1.5;padding:3px 0 3px 14px;position:relative}
+  .beat::before{content:'▸';position:absolute;left:0;color:var(--terra)}
+  .hasht{color:var(--blue);font-size:12px}
+  .utm-box{font-size:11px;color:var(--gray);background:var(--pale);border-radius:6px;padding:8px 10px;word-break:break-all;font-family:ui-monospace,monospace}
+  .lib-card .meta{font-size:11px;color:var(--gray);margin-bottom:10px}
 </style>
 </head>
 <body>
@@ -108,10 +140,10 @@
     <div class="logo">Collab <span>Cerebro</span></div>
     <nav>
       <a class="active" data-view="trends" onclick="go('trends')">Banco de Tendencias</a>
-      <a class="soon">Ideas / Angulos</a>
-      <a class="soon">Guiones</a>
+      <a data-view="prod" onclick="go('prod')">Produccion</a>
       <a class="soon">Influencers / BrandFit</a>
       <a class="soon">Calendario</a>
+      <a class="soon">Insights</a>
     </nav>
     <div class="user">
       <div id="userEmail"></div>
@@ -147,15 +179,45 @@
       </div>
       <div class="grid" id="trendGrid"></div>
     </section>
+
+    <!-- PRODUCCION -->
+    <section id="view-prod" class="hidden">
+      <div class="head">
+        <div>
+          <h2>Produccion</h2>
+          <div class="sub">De la tendencia al guion: genera angulos y conviertelos en guiones de IG y TikTok.</div>
+        </div>
+        <button class="btn btn-ghost" onclick="openLib()" id="libBtn">Guiones guardados (0)</button>
+      </div>
+
+      <div class="stage">
+        <div class="stage-t">1 · Punto de partida</div>
+        <div class="toolbar">
+          <select id="pTrend" onchange="onTrendPick()"><option value="">Tema libre...</option></select>
+          <input class="grow" id="pTheme" placeholder="Tema o angulo de partida (ej: rituales de cafe italiano en casa)" />
+          <select id="pPilar"><option value="">Pilar (auto)</option></select>
+          <button class="btn btn-primary" onclick="generarAngulos()" id="angBtn">Generar angulos</button>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="stage-t">2 · Angulos</div>
+        <div class="grid" id="angGrid"><div class="empty">Elige un tema o una tendencia en uso y dale "Generar angulos".</div></div>
+      </div>
+    </section>
   </main>
 </div>
 
+<div id="modal" class="modal hidden"></div>
 <div class="toast" id="toast"></div>
 
 <script>
 // ───────── Supabase + auth ─────────
 const sb = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON);
 let TRENDS = [];
+let SCRIPTS = [];       // biblioteca de guiones guardados
+let ANGLES  = [];       // angulos efimeros de la sesion actual
+let CURRENT = null;     // guion abierto en el modal
 const PILARES = ["Conoce al disenador","Identidad muy de aqui","Curaduria con criterio","Styling y guias","Colaboraciones/UGC","Founder y detras de camaras","Venta/eventos"];
 
 async function getToken(){ const { data } = await sb.auth.getSession(); return data.session?.access_token || null; }
@@ -187,10 +249,12 @@ async function boot(){
   document.getElementById('login').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('userEmail').textContent = data.session.user.email;
-  // poblar filtro de pilares
+  // poblar filtros de pilares (Tendencias y Produccion)
   const fp = document.getElementById('fPilar');
-  PILARES.forEach(p=>{ const o=document.createElement('option'); o.value=p; o.textContent=p; fp.appendChild(o); });
+  const pp = document.getElementById('pPilar');
+  PILARES.forEach(p=>{ fp.appendChild(new Option(p,p)); pp.appendChild(new Option(p,p)); });
   await loadTrends();
+  await loadScripts();
 }
 
 // ───────── Banco de Tendencias ─────────
@@ -293,8 +357,141 @@ async function buscarEjemplos(id, btn){
   }
 }
 
+// ───────── Produccion (angulos -> guiones) ─────────
+async function loadScripts(){ try{ SCRIPTS = await api('/api/scripts'); libCount(); }catch(e){ /* silencioso al arrancar */ } }
+async function persistScripts(){ await api('/api/scripts',{method:'PUT',body:SCRIPTS}); }
+function libCount(){ const b=document.getElementById('libBtn'); if(b) b.textContent='Guiones guardados ('+SCRIPTS.length+')'; }
+
+function refreshTrendPicker(){
+  const sel=document.getElementById('pTrend'); const cur=sel.value;
+  const enUso=TRENDS.filter(t=>t.estado==='en_uso');
+  sel.innerHTML='<option value="">Tema libre...</option>'+enUso.map(t=>`<option value="${t.id}">En uso: ${esc(t.titulo||'')}</option>`).join('');
+  sel.value=cur;
+}
+function onTrendPick(){
+  const t=TRENDS.find(x=>x.id===document.getElementById('pTrend').value);
+  if(t){ document.getElementById('pTheme').value=(t.titulo||'')+(t.descripcion?': '+t.descripcion:''); if(t.pilar) document.getElementById('pPilar').value=t.pilar; }
+}
+
+async function generarAngulos(){
+  const tema=document.getElementById('pTheme').value.trim();
+  const pilar=document.getElementById('pPilar').value;
+  if(!tema){ toast('Escribe un tema o elige una tendencia en uso.'); return; }
+  const b=document.getElementById('angBtn'); b.disabled=true; b.textContent='Generando...';
+  try{
+    const sys=`Eres estratega de contenido para redes. Generas angulos creativos, especificos y accionables, alineados a la marca y su pilar. Respondes SOLO un array JSON, sin texto extra.`;
+    const user=`Marca: ${BRAND_CONTEXT}\n\nTema de partida: ${tema}.\nPilar objetivo: ${pilar||'el mas afin al tema'}.\n\nGenera 4 angulos distintos entre si. Cada objeto: { "titulo" (corto), "gancho" (frase tipo hook de los primeros 3 segundos, conversacional, espanol colombiano), "formato" (ej: GRWM, voz en off, tutorial, POV, talking head, unboxing), "plataformas" (array con "instagram" y/o "tiktok"), "pilar" (uno de: ${PILARES.join(', ')}), "por_que" (1 frase: que busca lograr, guardados/alcance/confianza) }. Reglas: tono humano no corporativo, nunca nombrar competencia directa, prohibido usar guion largo (em-dash).`;
+    const r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:1600,system:sys,messages:[{role:'user',content:user}]}});
+    ANGLES=JSON.parse((r.content?.[0]?.text||'').replace(/```json|```/g,'').trim());
+    ANGLES.forEach(a=>a._tema=tema);
+    renderAngles();
+    toast('Generados '+ANGLES.length+' angulos. Elige uno para escribir el guion.');
+  }catch(e){ toast('Error generando angulos: '+e.message); }
+  b.disabled=false; b.textContent='Generar angulos';
+}
+
+function renderAngles(){
+  const g=document.getElementById('angGrid');
+  if(!ANGLES.length){ g.innerHTML='<div class="empty">Elige un tema o una tendencia en uso y dale "Generar angulos".</div>'; return; }
+  g.innerHTML=ANGLES.map((a,i)=>`<div class="card ang-card">
+    <div class="badges">
+      <span class="badge b-pilar">${esc(a.pilar||'')}</span>
+      ${(a.plataformas||[]).map(p=>`<span class="badge b-plat">${p}</span>`).join('')}
+      ${a.formato?`<span class="badge b-tag">${esc(a.formato)}</span>`:''}
+    </div>
+    <h3>${esc(a.titulo||'')}</h3>
+    <div class="gancho">“${esc(a.gancho||'')}”</div>
+    <div class="por">${esc(a.por_que||'')}</div>
+    <button class="btn btn-primary" onclick="escribirGuion(${i},this)">Escribir guion IG + TikTok</button>
+  </div>`).join('');
+}
+
+async function escribirGuion(i,btn){
+  const a=ANGLES[i]; if(!a) return;
+  const orig=btn.textContent; btn.disabled=true; btn.textContent='Escribiendo... (20s aprox)';
+  try{
+    const sys=`Eres guionista de video corto para marca/influencer. Escribes guiones que suenan a persona real hablando, con hook en los primeros 3 segundos y cierre emocional, adaptados a cada plataforma. Respondes SOLO un objeto JSON, sin texto extra.`;
+    const user=`Marca: ${BRAND_CONTEXT}\n\nAngulo: ${a.titulo}. Gancho: ${a.gancho}. Formato: ${a.formato}. Pilar: ${a.pilar}. Tema: ${a._tema}.\n\nEscribe el guion para IG Reel y para TikTok (TikTok mas rapido y nativo). Devuelve objeto JSON:\n{ "titulo", "ig": { "hook", "desarrollo" (array 3-5 lineas de guion habladas y cortas), "cierre", "caption", "hashtags" (array 4-8 sin #), "cta" }, "tiktok": { "hook", "desarrollo" (array 3-5), "cierre", "caption", "hashtags" (array 4-8 sin #), "audio" (sugerencia de audio o tendencia sonora), "cta" } }\nReglas: espanol colombiano natural, hook fuerte en 3s, nunca nombrar competencia directa (usa "la otra marca", "lo que todos compran"), cierre emocional, prohibido guion largo (em-dash).`;
+    const r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:2200,system:sys,messages:[{role:'user',content:user}]}});
+    const s=JSON.parse((r.content?.[0]?.text||'').replace(/```json|```/g,'').trim());
+    s.angulo=a.titulo; s.pilar=a.pilar; s.tema=a._tema;
+    s.plataformas=(a.plataformas&&a.plataformas.length)?a.plataformas:['instagram','tiktok'];
+    CURRENT=s; openScript(s,'new');
+  }catch(e){ toast('Error escribiendo guion: '+e.message); }
+  btn.disabled=false; btn.textContent=orig;
+}
+
+function openScript(s,mode){
+  const m=document.getElementById('modal');
+  m.innerHTML=`<div class="modal-box">
+    <div class="modal-head"><h3>${esc(s.titulo||'Guion')}</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body"><div class="plats">
+      ${platBlock('ig','Instagram Reel',s.ig||{},s)}
+      ${platBlock('tt','TikTok',s.tiktok||{},s)}
+    </div></div>
+    <div class="modal-foot">${mode==='new'
+      ? '<button class="btn btn-ghost" onclick="closeModal()">Descartar</button><button class="btn btn-primary" onclick="guardarGuion()">Guardar en biblioteca</button>'
+      : '<button class="btn btn-ghost" onclick="borrarGuion(\''+s.id+'\')">Eliminar</button><button class="btn btn-primary" onclick="closeModal()">Cerrar</button>'}</div>
+  </div>`;
+  m.classList.remove('hidden');
+}
+function platBlock(cls,name,p,s){
+  const plat=cls==='ig'?'instagram':'tiktok';
+  return `<div class="plat-block ${cls}">
+    <div class="ph">${name}</div>
+    <div class="pb">
+      <div class="fld"><div class="fl">Hook (0-3s)</div><div class="fv hookv">${esc(p.hook||'')}</div></div>
+      <div class="fld"><div class="fl">Desarrollo</div>${(p.desarrollo||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('')||'<div class="fv">-</div>'}</div>
+      <div class="fld"><div class="fl">Cierre</div><div class="fv">${esc(p.cierre||'')}</div></div>
+      ${p.audio?`<div class="fld"><div class="fl">Audio sugerido</div><div class="fv">${esc(p.audio)}</div></div>`:''}
+      <div class="fld"><div class="fl">Caption</div><div class="fv">${esc(p.caption||'')}</div></div>
+      <div class="fld"><div class="fl">Hashtags</div><div class="fv hasht">${(p.hashtags||[]).map(h=>'#'+String(h).replace(/^#/,'')).join('  ')}</div></div>
+      <div class="fld"><div class="fl">CTA</div><div class="fv">${esc(p.cta||'')}</div></div>
+      <div class="fld"><div class="fl">UTM</div><div class="utm-box">${utmFor(plat,s)}</div></div>
+    </div>
+  </div>`;
+}
+function utmFor(plat,s){
+  const slug=(s.tema||s.titulo||'contenido').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);
+  return `casaprecis.com?utm_source=${plat}&utm_medium=organico&utm_campaign=${slug}&utm_content=${plat==='tiktok'?'tiktok':'reel'}`;
+}
+
+async function guardarGuion(){
+  if(!CURRENT) return;
+  CURRENT.id=CURRENT.id||('scr_'+Math.random().toString(36).slice(2,10));
+  CURRENT.creado_en=CURRENT.creado_en||Date.now();
+  if(!SCRIPTS.find(x=>x.id===CURRENT.id)) SCRIPTS=[CURRENT,...SCRIPTS];
+  try{ await persistScripts(); libCount(); closeModal(); toast('Guion guardado en la biblioteca.'); }
+  catch(e){ toast('Error guardando: '+e.message); }
+}
+async function borrarGuion(id){
+  SCRIPTS=SCRIPTS.filter(x=>x.id!==id);
+  try{ await persistScripts(); libCount(); closeModal(); toast('Guion eliminado.'); }
+  catch(e){ toast('Error: '+e.message); }
+}
+function openLib(){
+  const m=document.getElementById('modal');
+  const body=SCRIPTS.length?`<div class="grid">${SCRIPTS.map(s=>`<div class="card lib-card">
+      <div class="badges"><span class="badge b-pilar">${esc(s.pilar||'')}</span>${(s.plataformas||[]).map(p=>`<span class="badge b-plat">${p}</span>`).join('')}</div>
+      <h3>${esc(s.titulo||'')}</h3>
+      <div class="meta">${esc(s.angulo||'')}</div>
+      <button class="btn btn-ghost" onclick="viewSaved('${s.id}')">Ver guion</button>
+    </div>`).join('')}</div>`:'<div class="empty">Aun no has guardado guiones.</div>';
+  m.innerHTML=`<div class="modal-box">
+    <div class="modal-head"><h3>Guiones guardados (${SCRIPTS.length})</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">${body}</div>
+  </div>`;
+  m.classList.remove('hidden');
+}
+function viewSaved(id){ const s=SCRIPTS.find(x=>x.id===id); if(!s) return; CURRENT=s; openScript(s,'saved'); }
+function closeModal(){ const m=document.getElementById('modal'); m.classList.add('hidden'); m.innerHTML=''; }
+
 // ───────── util ─────────
-function go(view){ document.querySelectorAll('#sidebar nav a').forEach(a=>a.classList.toggle('active', a.dataset.view===view)); }
+function go(view){
+  document.querySelectorAll('#sidebar nav a').forEach(a=>a.classList.toggle('active', a.dataset.view===view));
+  document.querySelectorAll('#main > section').forEach(s=>s.classList.toggle('hidden', s.id!=='view-'+view));
+  if(view==='prod') refreshTrendPicker();
+}
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmt(n){ n=+n; return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':n; }
 let toastT;

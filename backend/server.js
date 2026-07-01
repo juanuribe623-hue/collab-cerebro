@@ -32,9 +32,10 @@ app.use(cors({
 app.use(express.json({ limit: '30mb' }));
 app.use(express.static('public'));
 
-// Rutas de contenido (se iran sumando: ideas, scripts, brandfit, calendar, insights)
-app.use('/api/trends', require('./routes/trends'));
-app.use('/',           require('./routes/proxy'));   // /claude y /apify
+// Rutas de contenido (se iran sumando: brandfit, calendar, insights)
+app.use('/api/trends',  require('./routes/trends'));
+app.use('/api/scripts', require('./routes/scripts'));
+app.use('/',            require('./routes/proxy'));   // /claude y /apify
 
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
