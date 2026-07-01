@@ -107,6 +107,10 @@
   .hasht{color:var(--blue);font-size:12px}
   .utm-box{font-size:11px;color:var(--gray);background:var(--pale);border-radius:6px;padding:8px 10px;word-break:break-all;font-family:ui-monospace,monospace}
   .lib-card .meta{font-size:11px;color:var(--gray);margin-bottom:10px}
+  .gbeat{border-left:2px solid var(--sky);padding:4px 0 6px 10px;margin-bottom:8px}
+  .gtoma{font-size:11px;color:var(--terra);font-weight:600;margin-bottom:2px;line-height:1.35}
+  .gtexto{font-size:13px;line-height:1.45;color:var(--slate)}
+  .ficha{background:var(--pale);border-radius:6px;padding:7px 10px;font-size:12px;color:var(--navy);margin-bottom:10px}
 </style>
 </head>
 <body>
@@ -292,7 +296,7 @@ function renderTrends(){
       <h3>${esc(t.titulo||'(sin titulo)')}</h3>
       <div class="desc">${esc(t.descripcion||'')}</div>
       ${tags?`<div class="badges">${tags}</div>`:''}
-      <div class="videos"><div class="vt">Ejemplos con impacto real</div>${videos||'<div style="font-size:12px;color:var(--gray);margin-bottom:6px">Aun sin ejemplos.</div>'}<button class="est-btn" style="margin-top:2px" onclick="buscarEjemplos('${t.id}',this)">Buscar ejemplos en TikTok</button></div>
+      <div class="videos"><div class="vt">Ejemplos con impacto real</div>${videos||'<div style="font-size:12px;color:var(--gray);margin-bottom:6px">Aun sin ejemplos.</div>'}<div style="display:flex;gap:6px;margin-top:2px"><button class="est-btn" onclick="buscarEjemplos('${t.id}',this)">Buscar en TikTok</button><button class="est-btn" onclick="buscarEjemplosIG('${t.id}',this)">Buscar en IG</button></div></div>
       <div class="estado-row">
         <span class="lbl">Estado:</span>
         <button class="est-btn en_uso ${estado==='en_uso'?'on':''}" onclick="setEstado('${t.id}','en_uso')">En uso</button>
@@ -307,6 +311,11 @@ function setEstado(id, estado){
   const t=TRENDS.find(x=>x.id===id); if(!t) return;
   t.estado = (t.estado===estado)?'nueva':estado;
   renderTrends();
+  persistTrends();   // auto-guardar: el estado se persiste al instante
+}
+async function persistTrends(){
+  try{ await api('/api/trends',{method:'PUT',body:TRENDS}); }
+  catch(e){ toast('No pude guardar: '+e.message); }
 }
 
 async function saveTrends(){
@@ -348,11 +357,35 @@ async function buscarEjemplos(id, btn){
     const vids=(items||[]).filter(v=>v && v.webVideoUrl)
       .sort((a,b)=>(b.playCount||0)-(a.playCount||0)).slice(0,2)
       .map(v=>({ url:v.webVideoUrl, plataforma:'tiktok', vistas:v.playCount||0, likes:v.diggCount||0 }));
-    t.videos = vids;
-    renderTrends();
-    toast(vids.length ? ('Encontre '+vids.length+' ejemplos. Recuerda Guardar.') : ('Sin ejemplos para "'+q+'".'));
+    t.videos = [...(t.videos||[]).filter(x=>x.plataforma!=='tiktok'), ...vids];
+    renderTrends(); persistTrends();
+    toast(vids.length ? ('TikTok: '+vids.length+' ejemplos.') : ('Sin ejemplos TikTok para "'+q+'".'));
   }catch(e){
     toast('Error buscando: '+e.message);
+    btn.disabled=false; btn.textContent=orig;
+  }
+}
+
+// Buscar ejemplos reales en Instagram (por hashtag), via Apify
+async function buscarEjemplosIG(id, btn){
+  const t=TRENDS.find(x=>x.id===id); if(!t) return;
+  let tag=(((t.tags&&t.tags[0])||t.busqueda||t.titulo||'')+'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'');
+  if(!tag){ toast('Sin termino para buscar en IG.'); return; }
+  const orig=btn.textContent; btn.disabled=true; btn.textContent='Buscando IG... (30s aprox)';
+  try{
+    const items=await api('/apify',{method:'POST',body:{
+      path:'/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items',
+      method:'POST',
+      body:{ directUrls:['https://www.instagram.com/explore/tags/'+tag+'/'], resultsType:'posts', resultsLimit:8, addParentData:false }
+    }});
+    const vids=(items||[]).filter(v=>v && v.url)
+      .sort((a,b)=>((b.videoViewCount||b.likesCount||0)-(a.videoViewCount||a.likesCount||0))).slice(0,2)
+      .map(v=>({ url:v.url, plataforma:'instagram', vistas:v.videoViewCount||0, likes:v.likesCount||0 }));
+    t.videos=[...(t.videos||[]).filter(x=>x.plataforma!=='instagram'), ...vids];
+    renderTrends(); persistTrends();
+    toast(vids.length ? ('IG: '+vids.length+' ejemplos (#'+tag+').') : ('Sin ejemplos IG para #'+tag+'.'));
+  }catch(e){
+    toast('Error IG: '+e.message);
     btn.disabled=false; btn.textContent=orig;
   }
 }
@@ -364,8 +397,12 @@ function libCount(){ const b=document.getElementById('libBtn'); if(b) b.textCont
 
 function refreshTrendPicker(){
   const sel=document.getElementById('pTrend'); const cur=sel.value;
-  const enUso=TRENDS.filter(t=>t.estado==='en_uso');
-  sel.innerHTML='<option value="">Tema libre...</option>'+enUso.map(t=>`<option value="${t.id}">En uso: ${esc(t.titulo||'')}</option>`).join('');
+  const pick=TRENDS.filter(t=>t.estado==='en_uso'||t.estado==='guardada')
+    .sort((a,b)=> (a.estado==='en_uso'?0:1)-(b.estado==='en_uso'?0:1));
+  sel.innerHTML='<option value="">Tema libre...</option>'+pick.map(t=>{
+    const tag=t.estado==='en_uso'?'En uso':'Guardada';
+    return `<option value="${t.id}">${tag}: ${esc(t.titulo||'')}</option>`;
+  }).join('');
   sel.value=cur;
 }
 function onTrendPick(){
@@ -410,9 +447,9 @@ async function escribirGuion(i,btn){
   const a=ANGLES[i]; if(!a) return;
   const orig=btn.textContent; btn.disabled=true; btn.textContent='Escribiendo... (20s aprox)';
   try{
-    const sys=`Eres guionista de video corto para marca/influencer. Escribes guiones que suenan a persona real hablando, con hook en los primeros 3 segundos y cierre emocional, adaptados a cada plataforma. Respondes SOLO un objeto JSON, sin texto extra.`;
-    const user=`Marca: ${BRAND_CONTEXT}\n\nAngulo: ${a.titulo}. Gancho: ${a.gancho}. Formato: ${a.formato}. Pilar: ${a.pilar}. Tema: ${a._tema}.\n\nEscribe el guion para IG Reel y para TikTok (TikTok mas rapido y nativo). Devuelve objeto JSON:\n{ "titulo", "ig": { "hook", "desarrollo" (array 3-5 lineas de guion habladas y cortas), "cierre", "caption", "hashtags" (array 4-8 sin #), "cta" }, "tiktok": { "hook", "desarrollo" (array 3-5), "cierre", "caption", "hashtags" (array 4-8 sin #), "audio" (sugerencia de audio o tendencia sonora), "cta" } }\nReglas: espanol colombiano natural, hook fuerte en 3s, nunca nombrar competencia directa (usa "la otra marca", "lo que todos compran"), cierre emocional, prohibido guion largo (em-dash).`;
-    const r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:2200,system:sys,messages:[{role:'user',content:user}]}});
+    const sys=`Eres director creativo y guionista de video corto para una marca de moda y diseno. Escribes guiones LISTOS PARA PRODUCIR: cada linea del guion va acompanada de su TOMA (que se ve en pantalla), mas una lista de tomas clave a grabar y notas de produccion. Suena a persona real hablando. Respondes SOLO un objeto JSON valido, sin texto extra.`;
+    const user=`Marca: ${BRAND_CONTEXT}\n\nAngulo: ${a.titulo}. Gancho: ${a.gancho}. Formato: ${a.formato}. Pilar: ${a.pilar}. Tema: ${a._tema}.\n\nEscribe un guion DETALLADO y listo para rodaje, para IG Reel y para TikTok. Nivel de detalle alto, como un guion de produccion con direccion de tomas plano por plano.\nDevuelve objeto JSON con esta forma exacta:\n{\n "titulo",\n "ig": {\n   "ficha": { "formato", "duracion" (ej "30-45s"), "objetivo" },\n   "hook",\n   "guion": [ { "toma": "descripcion visual concreta del plano y la accion (ej: Plano detalle de las manos cosiendo sobre el telar)", "texto": "lo que se dice en voz en off o aparece en pantalla en ese plano" } ]  (entre 5 y 8 beats),\n   "cierre",\n   "tomas": [ "lista de 4 a 7 tomas clave a grabar, cada una con tipo de plano" ],\n   "notas": [ "3 a 5 notas de produccion: locacion, props, styling, ritmo, luz, musica" ],\n   "caption", "hashtags" (array 5-8 sin #), "cta"\n },\n "tiktok": { "ficha": {"formato","duracion","objetivo"}, "hook", "guion": [ {"toma","texto"} ] (entre 4 y 7 beats, mas rapido y nativo), "cierre", "tomas": [...], "audio" (sugerencia concreta de sonido o tendencia sonora), "notas": [...], "caption", "hashtags" (array 5-8 sin #), "cta" }\n}\nReglas: espanol colombiano natural y humano, hook fuerte en los primeros 3s, nunca nombrar competencia directa (usa "la otra marca", "lo que todos compran"), cierre emocional, prohibido usar guion largo (em-dash). Las tomas deben ser concretas y grabables, no genericas.`;
+    const r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:3500,system:sys,messages:[{role:'user',content:user}]}});
     const s=JSON.parse((r.content?.[0]?.text||'').replace(/```json|```/g,'').trim());
     s.angulo=a.titulo; s.pilar=a.pilar; s.tema=a._tema;
     s.plataformas=(a.plataformas&&a.plataformas.length)?a.plataformas:['instagram','tiktok'];
@@ -437,13 +474,21 @@ function openScript(s,mode){
 }
 function platBlock(cls,name,p,s){
   const plat=cls==='ig'?'instagram':'tiktok';
+  const dur=(p.ficha&&p.ficha.duracion)?' · '+esc(p.ficha.duracion):'';
+  const ficha=p.ficha?`<div class="ficha">Formato: ${esc(p.ficha.formato||'')} · Objetivo: ${esc(p.ficha.objetivo||'')}</div>`:'';
+  const guion=(p.guion&&p.guion.length)
+    ? p.guion.map(b=>`<div class="gbeat"><div class="gtoma">🎬 ${esc(b.toma||'')}</div><div class="gtexto">${esc(b.texto||'')}</div></div>`).join('')
+    : (p.desarrollo||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('');
   return `<div class="plat-block ${cls}">
-    <div class="ph">${name}</div>
+    <div class="ph">${name}${dur}</div>
     <div class="pb">
+      ${ficha}
       <div class="fld"><div class="fl">Hook (0-3s)</div><div class="fv hookv">${esc(p.hook||'')}</div></div>
-      <div class="fld"><div class="fl">Desarrollo</div>${(p.desarrollo||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('')||'<div class="fv">-</div>'}</div>
+      <div class="fld"><div class="fl">Guion · toma + texto</div>${guion||'<div class="fv">-</div>'}</div>
       <div class="fld"><div class="fl">Cierre</div><div class="fv">${esc(p.cierre||'')}</div></div>
+      ${(p.tomas&&p.tomas.length)?`<div class="fld"><div class="fl">Tomas a grabar</div>${p.tomas.map(x=>`<div class="beat">${esc(x)}</div>`).join('')}</div>`:''}
       ${p.audio?`<div class="fld"><div class="fl">Audio sugerido</div><div class="fv">${esc(p.audio)}</div></div>`:''}
+      ${(p.notas&&p.notas.length)?`<div class="fld"><div class="fl">Notas de produccion</div>${p.notas.map(x=>`<div class="beat">${esc(x)}</div>`).join('')}</div>`:''}
       <div class="fld"><div class="fl">Caption</div><div class="fv">${esc(p.caption||'')}</div></div>
       <div class="fld"><div class="fl">Hashtags</div><div class="fv hasht">${(p.hashtags||[]).map(h=>'#'+String(h).replace(/^#/,'')).join('  ')}</div></div>
       <div class="fld"><div class="fl">CTA</div><div class="fv">${esc(p.cta||'')}</div></div>
