@@ -116,6 +116,11 @@
   .bf label{display:block;font-size:12px;font-weight:700;color:var(--gray);margin-bottom:5px}
   .bf input,.bf textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;color:var(--slate)}
   .bf .hint{font-size:11px;color:var(--gray);margin-top:4px}
+  .score{display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:46px;border-radius:50%;font-weight:800;font-size:16px;color:#fff;flex-shrink:0}
+  .score.alto{background:var(--green)} .score.medio{background:var(--amber)} .score.bajo{background:#94a3b8}
+  .bf-top{display:flex;gap:12px;align-items:center;margin-bottom:10px}
+  .bf-top .who{font-weight:700;color:var(--navy);font-size:15px}
+  .bf-top .sub2{font-size:12px;color:var(--gray);margin-top:2px}
 </style>
 </head>
 <body>
@@ -159,7 +164,7 @@
       <a class="active" data-view="trends" onclick="go('trends')">Banco de Tendencias</a>
       <a data-view="prod" onclick="go('prod')">Produccion</a>
       <a data-view="brief" onclick="go('brief')">Brief de marca</a>
-      <a class="soon">Influencers / BrandFit</a>
+      <a data-view="brandfit" onclick="go('brandfit')">Influencers / BrandFit</a>
       <a class="soon">Calendario</a>
       <a class="soon">Insights</a>
     </nav>
@@ -243,6 +248,28 @@
         <div class="bf"><label>Objetivo de engagement</label><input id="bEng" /></div>
       </div>
     </section>
+
+    <!-- INFLUENCERS / BRANDFIT -->
+    <section id="view-brandfit" class="hidden">
+      <div class="head">
+        <div>
+          <h2>Influencers / BrandFit</h2>
+          <div class="sub">Evalua que tan afin es un creador a la marca antes de proponerle una colaboracion.</div>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="stage-t">Evaluar un creador</div>
+        <div class="toolbar">
+          <select id="bfPlat"><option value="tiktok">TikTok</option><option value="instagram">Instagram</option></select>
+          <input class="grow" id="bfHandle" placeholder="usuario del creador (ej: b.eats___ o @b.eats___)" />
+          <button class="btn btn-primary" onclick="evaluarBrandFit()" id="bfBtn">Evaluar BrandFit</button>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="stage-t">Evaluados</div>
+        <div class="grid" id="bfGrid"><div class="empty">Aun no has evaluado creadores. Escribe un usuario y dale "Evaluar BrandFit".</div></div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -256,6 +283,7 @@ let TRENDS = [];
 let SCRIPTS = [];       // biblioteca de guiones guardados
 let ANGLES  = [];       // angulos efimeros de la sesion actual
 let CURRENT = null;     // guion abierto en el modal
+let INFLUENCERS = [];   // creadores evaluados (BrandFit)
 let BRIEF   = DEFAULT_BRIEF;                        // brief de la empresa (se carga de /api/brief)
 let PILARES = DEFAULT_BRIEF.pilares.slice();        // derivado del brief
 let BRAND_CONTEXT = briefToContext(DEFAULT_BRIEF);  // texto de contexto para los prompts
@@ -297,6 +325,7 @@ async function boot(){
   await loadBrief();      // define BRAND_CONTEXT + PILARES + puebla dropdowns + llena el form
   await loadTrends();
   await loadScripts();
+  await loadInfluencers();
 }
 
 // ───────── Brief de marca ─────────
@@ -369,7 +398,7 @@ function renderTrends(){
       <h3>${esc(t.titulo||'(sin titulo)')}</h3>
       <div class="desc">${esc(t.descripcion||'')}</div>
       ${tags?`<div class="badges">${tags}</div>`:''}
-      <div class="videos"><div class="vt">Ejemplos con impacto real</div>${videos||'<div style="font-size:12px;color:var(--gray);margin-bottom:6px">Aun sin ejemplos.</div>'}<div style="display:flex;gap:6px;margin-top:2px"><button class="est-btn" onclick="buscarEjemplos('${t.id}',this)">Buscar en TikTok</button><button class="est-btn" onclick="buscarEjemplosIG('${t.id}',this)">Buscar en IG</button></div></div>
+      <div class="videos"><div class="vt">Ejemplos con impacto real</div>${videos||'<div style="font-size:12px;color:var(--gray);margin-bottom:6px">Aun sin ejemplos.</div>'}<div style="display:flex;gap:6px;margin-top:2px"><button class="est-btn" onclick="buscarEjemplos('${t.id}',this)">Buscar ejemplos en TikTok</button></div></div>
       <div class="estado-row">
         <span class="lbl">Estado:</span>
         <button class="est-btn en_uso ${estado==='en_uso'?'on':''}" onclick="setEstado('${t.id}','en_uso')">En uso</button>
@@ -646,6 +675,97 @@ function openLib(){
 }
 function viewSaved(id){ const s=SCRIPTS.find(x=>x.id===id); if(!s) return; CURRENT=s; openScript(s,'saved'); }
 function closeModal(){ const m=document.getElementById('modal'); m.classList.add('hidden'); m.innerHTML=''; }
+
+// ───────── Influencers / BrandFit ─────────
+async function loadInfluencers(){ try{ INFLUENCERS=await api('/api/influencers'); }catch(e){} renderBrandFit(); }
+async function persistInfluencers(){ await api('/api/influencers',{method:'PUT',body:INFLUENCERS}); }
+
+// Trae el perfil real del creador (TikTok o IG por handle; el perfil si es confiable, a diferencia del hashtag)
+async function fetchProfile(plat,handle){
+  if(plat==='tiktok'){
+    const items=await api('/apify',{method:'POST',body:{
+      path:'/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items', method:'POST',
+      body:{ profiles:[handle], resultsPerPage:8, shouldDownloadVideos:false, shouldDownloadCovers:false, shouldDownloadSubtitles:false }
+    }});
+    if(!items || !items.length) return null;
+    const a=items[0].authorMeta||{};
+    return { nombre:a.nickName||handle, seguidores:a.fans||0, bio:a.signature||'',
+      muestras:items.slice(0,6).map(v=>({ texto:((v.text||'')+'').slice(0,110), vistas:v.playCount||0, likes:v.diggCount||0 })) };
+  }else{
+    const items=await api('/apify',{method:'POST',body:{
+      path:'/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items', method:'POST',
+      body:{ directUrls:['https://www.instagram.com/'+handle+'/'], resultsType:'details', resultsLimit:1, addParentData:false }
+    }});
+    const p=items && items[0]; if(!p) return null;
+    return { nombre:p.fullName||handle, seguidores:p.followersCount||0, bio:p.biography||'',
+      muestras:(p.latestPosts||[]).slice(0,6).map(x=>({ texto:((x.caption||'')+'').slice(0,110), likes:x.likesCount||0, vistas:x.videoViewCount||0 })) };
+  }
+}
+
+async function evaluarBrandFit(){
+  const plat=document.getElementById('bfPlat').value;
+  const handle=document.getElementById('bfHandle').value.trim().replace(/^@/,'').replace(/\/+$/,'');
+  if(!handle){ toast('Escribe el usuario del creador.'); return; }
+  const b=document.getElementById('bfBtn'); b.disabled=true; b.textContent='Trayendo perfil... (1 min aprox)';
+  try{
+    const prof=await fetchProfile(plat,handle);
+    if(!prof){ toast('No pude traer @'+handle+' en '+plat+'. Revisa el usuario.'); b.disabled=false; b.textContent='Evaluar BrandFit'; return; }
+    b.textContent='Evaluando fit con la marca...';
+    const muestras=(prof.muestras||[]).map(m=>`"${m.texto||''}" (${m.vistas?fmt(m.vistas)+' vistas':fmt(m.likes||0)+' likes'})`).join(' || ');
+    const score=await claudeJSON(
+      `Eres experto en marketing de influencers. Evaluas el brand fit entre un creador y una marca con criterio y honestidad, incluyendo riesgos reales. Respondes SOLO un objeto JSON.`,
+      `Marca: ${BRAND_CONTEXT}\n\nCreador @${handle} (${plat}): ${prof.seguidores||0} seguidores. Bio: ${prof.bio||'(sin bio)'}. Muestras de contenido: ${muestras||'(sin muestras)'}.\n\nEvalua el brand fit. Devuelve objeto JSON: { "score" (numero 0-100), "veredicto" ("Alto"|"Medio"|"Bajo"), "alineacion" (array 2-4 razones concretas de por que encaja o no con la marca), "audiencia" (frase sobre que tan afin es su audiencia), "riesgos" (array 1-3 red flags o cosas a validar), "angulo_colab" (idea concreta de colaboracion afin a la marca), "formato" (formato sugerido) }. Se honesto: si no encaja, dilo claro. Prohibido em-dash.`,
+      1500);
+    const inf={ id:'inf_'+Math.random().toString(36).slice(2,10), handle, plataforma:plat,
+      nombre:prof.nombre||handle, seguidores:prof.seguidores||0, bio:prof.bio||'', ...score, evaluado_en:Date.now() };
+    INFLUENCERS=[inf, ...INFLUENCERS.filter(x=>!(x.handle===handle && x.plataforma===plat))];
+    await persistInfluencers();
+    renderBrandFit(); openInfluencer(inf.id);
+    document.getElementById('bfHandle').value='';
+  }catch(e){ toast('Error evaluando: '+e.message); }
+  b.disabled=false; b.textContent='Evaluar BrandFit';
+}
+
+function renderBrandFit(){
+  const g=document.getElementById('bfGrid'); if(!g) return;
+  if(!INFLUENCERS.length){ g.innerHTML='<div class="empty">Aun no has evaluado creadores. Escribe un usuario y dale "Evaluar BrandFit".</div>'; return; }
+  g.innerHTML=INFLUENCERS.map(i=>{
+    const v=(i.veredicto||'').toLowerCase();
+    return `<div class="card">
+      <div class="bf-top">
+        <div class="score ${v}">${i.score!=null?i.score:'?'}</div>
+        <div><div class="who">@${esc(i.handle)}</div><div class="sub2">${esc(i.plataforma)} · ${fmt(i.seguidores||0)} seguidores · Fit ${esc(i.veredicto||'')}</div></div>
+      </div>
+      <div class="desc">${esc((i.alineacion||[])[0]||'')}</div>
+      <button class="btn btn-ghost" onclick="openInfluencer('${i.id}')">Ver evaluacion</button>
+    </div>`;
+  }).join('');
+}
+
+function openInfluencer(id){
+  const i=INFLUENCERS.find(x=>x.id===id); if(!i) return;
+  const v=(i.veredicto||'').toLowerCase();
+  const m=document.getElementById('modal');
+  m.innerHTML=`<div class="modal-box">
+    <div class="modal-head"><h3>@${esc(i.handle)} · ${esc(i.plataforma)}</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="bf-top"><div class="score ${v}">${i.score!=null?i.score:'?'}</div><div><div class="who">Fit ${esc(i.veredicto||'')}</div><div class="sub2">${fmt(i.seguidores||0)} seguidores${i.nombre?' · '+esc(i.nombre):''}</div></div></div>
+      ${i.bio?`<div class="fld"><div class="fl">Bio</div><div class="fv">${esc(i.bio)}</div></div>`:''}
+      <div class="fld"><div class="fl">Alineacion con la marca</div>${(i.alineacion||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('')||'<div class="fv">-</div>'}</div>
+      <div class="fld"><div class="fl">Audiencia</div><div class="fv">${esc(i.audiencia||'')}</div></div>
+      <div class="fld"><div class="fl">Riesgos / a validar</div>${(i.riesgos||[]).map(x=>`<div class="beat">${esc(x)}</div>`).join('')||'<div class="fv">-</div>'}</div>
+      <div class="fld"><div class="fl">Angulo de colaboracion</div><div class="fv sharev">${esc(i.angulo_colab||'')}</div></div>
+      <div class="fld"><div class="fl">Formato sugerido</div><div class="fv">${esc(i.formato||'')}</div></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="borrarInfluencer('${i.id}')">Eliminar</button><button class="btn btn-primary" onclick="closeModal()">Cerrar</button></div>
+  </div>`;
+  m.classList.remove('hidden');
+}
+async function borrarInfluencer(id){
+  INFLUENCERS=INFLUENCERS.filter(x=>x.id!==id);
+  try{ await persistInfluencers(); }catch(e){}
+  renderBrandFit(); closeModal(); toast('Evaluacion eliminada.');
+}
 
 // ───────── util ─────────
 function go(view){

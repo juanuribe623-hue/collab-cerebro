@@ -53,6 +53,18 @@ CREATE TABLE IF NOT EXISTS company_brief (
   updated_at BIGINT NOT NULL DEFAULT 0
 );
 
+-- Creadores evaluados (BrandFit de colaboraciones), por empresa
+-- data: { handle, plataforma, nombre, seguidores, bio, score, veredicto,
+--         alineacion[], audiencia, riesgos[], angulo_colab, formato, evaluado_en }
+CREATE TABLE IF NOT EXISTS content_influencers (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id UUID   NOT NULL,
+  inf_id     TEXT   NOT NULL,
+  data       JSONB  NOT NULL DEFAULT '{}'::jsonb,
+  updated_at BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_content_influencers_company ON content_influencers (company_id);
+
 -- ───────────────────────────────────────────────────────────────────────────
 -- SEMBRAR EL PRIMER CLIENTE (Casa Precis)
 -- 1) Crear la empresa:
