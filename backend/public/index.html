@@ -359,7 +359,7 @@ function renderTrends(){
   if(!items.length){ grid.innerHTML='<div class="empty">No hay tendencias con esos filtros. Dale a "Traer tendencias" para generar.</div>'; return; }
   grid.innerHTML = items.map(t=>{
     const estado=t.estado||'nueva';
-    const videos=(t.videos||[]).map(v=>`<a href="${v.url}" target="_blank">▶ ${v.plataforma||'video'} <span>· ${v.vistas?fmt(v.vistas)+' vistas':''} ${v.engagement?'· '+v.engagement+' eng':''}</span></a>`).join('');
+    const videos=(t.videos||[]).map(v=>{ const metric=v.vistas?fmt(v.vistas)+' vistas':(v.likes?fmt(v.likes)+' likes':'sin datos'); return `<a href="${v.url}" target="_blank">▶ ${v.plataforma||'video'} <span>· ${metric}</span></a>`; }).join('');
     const tags=(t.tags||[]).map(x=>`<span class="badge b-tag">#${x}</span>`).join('');
     return `<div class="card">
       <div class="badges">
@@ -490,14 +490,15 @@ async function buscarEjemplosIG(id, btn){
     const items=await api('/apify',{method:'POST',body:{
       path:'/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items',
       method:'POST',
-      body:{ directUrls:['https://www.instagram.com/explore/tags/'+tag+'/'], resultsType:'posts', resultsLimit:8, addParentData:false }
+      body:{ directUrls:['https://www.instagram.com/explore/tags/'+tag+'/'], resultsType:'posts', resultsLimit:12, addParentData:false }
     }});
-    const vids=(items||[]).filter(v=>v && v.url)
+    // IG limita el hashtag: filtramos por calidad para no mostrar posts basura de 5 likes.
+    const vids=(items||[]).filter(v=>v && v.url && ((v.videoViewCount||0)>=1000 || (v.likesCount||0)>=300))
       .sort((a,b)=>((b.videoViewCount||b.likesCount||0)-(a.videoViewCount||a.likesCount||0))).slice(0,2)
       .map(v=>({ url:v.url, plataforma:'instagram', vistas:v.videoViewCount||0, likes:v.likesCount||0 }));
     t.videos=[...(t.videos||[]).filter(x=>x.plataforma!=='instagram'), ...vids];
     renderTrends(); persistTrends();
-    toast(vids.length ? ('IG: '+vids.length+' ejemplos (#'+tag+').') : ('Sin ejemplos IG para #'+tag+'.'));
+    toast(vids.length ? ('IG: '+vids.length+' ejemplos (#'+tag+').') : ('IG limita la busqueda por hashtag: sin ejemplos de calidad para #'+tag+'.'));
   }catch(e){
     toast('Error IG: '+e.message);
     btn.disabled=false; btn.textContent=orig;
