@@ -1318,6 +1318,10 @@ function insModal(e){
   m.innerHTML=`<div class="modal-box" style="max-width:560px">
     <div class="modal-head"><h3>${isNew?'Registrar publicacion':'Editar publicacion'}</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="modal-body">
+      <div class="bf"><label>URL del post (pega el link y trae las metricas solas)</label>
+        <div style="display:flex;gap:8px"><input id="iUrl" style="flex:1" value="${esc(e.url||'')}" placeholder="Link de TikTok o Instagram" />
+        <button class="btn btn-ghost" type="button" onclick="traerMetricas()" id="iFetchBtn">Traer metricas</button></div>
+      </div>
       <div class="bf"><label>Titulo</label><input id="iTitulo" value="${esc(e.titulo||'')}" /></div>
       <div class="bf"><label>Pilar</label><select id="iPilar">${pilOpts}</select></div>
       <div class="bf"><label>Plataforma</label><select id="iPlat">${plats}</select></div>
@@ -1338,7 +1342,7 @@ function insModal(e){
 async function saveInsight(id){
   const v=x=>document.getElementById(x).value; const n=x=>+document.getElementById(x).value||0;
   const obj={ id:id||('ins_'+Math.random().toString(36).slice(2,10)),
-    titulo:(v('iTitulo').trim()||'(sin titulo)'), pilar:v('iPilar'), plataforma:v('iPlat'), formato:v('iFormato').trim(), fecha:v('iFecha'),
+    titulo:(v('iTitulo').trim()||'(sin titulo)'), pilar:v('iPilar'), plataforma:v('iPlat'), formato:v('iFormato').trim(), fecha:v('iFecha'), url:v('iUrl').trim(),
     vistas:n('iVistas'), guardados:n('iGuard'), compartidos:n('iComp'), likes:n('iLikes'), comentarios:n('iComent') };
   INSIGHTS = id ? INSIGHTS.map(x=>x.id===id?obj:x) : [obj,...INSIGHTS];
   try{ await persistInsights(); }catch(e){ toast('Error: '+e.message); }
@@ -1348,6 +1352,47 @@ async function deleteInsight(id){
   INSIGHTS=INSIGHTS.filter(x=>x.id!==id);
   try{ await persistInsights(); }catch(e){}
   closeModal(); renderInsights(); toast('Eliminado.');
+}
+
+// Trae metricas reales de un post por su URL. TikTok: completo (incluye guardados/compartidos). IG: parcial (no publica esos dos).
+async function fetchPostMetrics(url){
+  if(/tiktok\.com/i.test(url)){
+    const items=await api('/apify',{method:'POST',body:{
+      path:'/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items', method:'POST',
+      body:{ postURLs:[url], resultsPerPage:1, shouldDownloadVideos:false, shouldDownloadCovers:false, shouldDownloadSubtitles:false }
+    }});
+    const v=items && items[0]; if(!v) return null;
+    return { plataforma:'tiktok', vistas:v.playCount||0, likes:v.diggCount||0, compartidos:v.shareCount||0, comentarios:v.commentCount||0, guardados:v.collectCount||0, titulo:((v.text||'')+'').slice(0,80), completo:true };
+  }
+  if(/instagram\.com/i.test(url)){
+    const items=await api('/apify',{method:'POST',body:{
+      path:'/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items', method:'POST',
+      body:{ directUrls:[url], resultsType:'posts', resultsLimit:1, addParentData:false }
+    }});
+    const p=items && items[0]; if(!p) return null;
+    return { plataforma:'instagram', vistas:p.videoViewCount||0, likes:p.likesCount||0, compartidos:0, comentarios:p.commentsCount||0, guardados:0, titulo:((p.caption||'')+'').slice(0,80), completo:false };
+  }
+  return null;
+}
+async function traerMetricas(){
+  const url=document.getElementById('iUrl').value.trim();
+  if(!url){ toast('Pega la URL del post (TikTok o Instagram).'); return; }
+  const btn=document.getElementById('iFetchBtn'); btn.disabled=true; btn.textContent='Trayendo... (30s)';
+  try{
+    const m=await fetchPostMetrics(url);
+    if(!m){ toast('No pude traer ese post. Revisa que la URL sea de TikTok o Instagram.'); }
+    else{
+      document.getElementById('iPlat').value=m.plataforma;
+      if(m.titulo && !document.getElementById('iTitulo').value.trim()) document.getElementById('iTitulo').value=m.titulo;
+      document.getElementById('iVistas').value=m.vistas;
+      document.getElementById('iLikes').value=m.likes;
+      document.getElementById('iComent').value=m.comentarios;
+      document.getElementById('iComp').value=m.compartidos;
+      document.getElementById('iGuard').value=m.guardados;
+      toast(m.completo ? 'TikTok: metricas completas traidas.' : 'IG: traje vistas, likes y comentarios. Guardados y compartidos no son publicos, ponlos a mano.');
+    }
+  }catch(e){ toast('Error trayendo: '+e.message); }
+  btn.disabled=false; btn.textContent='Traer metricas';
 }
 
 async function analizarInsights(){
