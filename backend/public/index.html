@@ -395,7 +395,10 @@
           <h2>Insights</h2>
           <div class="sub">Que esta funcionando para guardados y compartidos, y como mejorar los hooks.</div>
         </div>
-        <button class="btn btn-primary" onclick="insModal({})">Registrar publicacion</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="batchModal()">Registrar varias por links</button>
+          <button class="btn btn-primary" onclick="insModal({})">Registrar publicacion</button>
+        </div>
       </div>
       <div id="insStats" class="balance"></div>
       <div id="insAnalysis"></div>
@@ -458,7 +461,7 @@ async function api(path, opts={}){
     headers: { 'Content-Type':'application/json', ...(token?{'Authorization':'Bearer '+token}:{}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  if(!res.ok){ const e = await res.json().catch(()=>({error:res.statusText})); throw new Error(e.error||'Error'); }
+  if(!res.ok){ const e = await res.json().catch(()=>({error:res.statusText})); const msg = typeof e.error==='string'?e.error:(e.error?JSON.stringify(e.error):(e.message||('HTTP '+res.status))); throw new Error(msg); }
   return res.json();
 }
 
@@ -591,8 +594,20 @@ async function saveTrends(){
 
 // Helper: llamada a Claude que devuelve JSON parseado
 async function claudeJSON(sys,user,max){
-  const r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:max||1500,system:sys,messages:[{role:'user',content:user}]}});
-  return JSON.parse((r.content?.[0]?.text||'').replace(/```json|```/g,'').trim());
+  let last;
+  for(let attempt=0;attempt<2;attempt++){
+    try{
+      const r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:max||1500,system:sys,messages:[{role:'user',content:user}]}});
+      let txt=(r.content?.[0]?.text||'').replace(/```json|```/g,'').trim();
+      try{ return JSON.parse(txt); }
+      catch(_){
+        const s=txt.search(/[[{]/), e=Math.max(txt.lastIndexOf(']'),txt.lastIndexOf('}'));
+        if(s>=0 && e>s) return JSON.parse(txt.slice(s,e+1));
+        throw new Error('Respuesta no-JSON de la IA');
+      }
+    }catch(err){ last=err; }
+  }
+  throw last;
 }
 // Helper: videos reales de TikTok para un termino (con texto y hashtags para analisis)
 async function fetchTikTok(q){
@@ -1370,9 +1385,40 @@ async function fetchPostMetrics(url){
       body:{ directUrls:[url], resultsType:'posts', resultsLimit:1, addParentData:false }
     }});
     const p=items && items[0]; if(!p) return null;
-    return { plataforma:'instagram', vistas:p.videoViewCount||0, likes:p.likesCount||0, compartidos:0, comentarios:p.commentsCount||0, guardados:0, titulo:((p.caption||'')+'').slice(0,80), completo:false };
+    const views=p.videoViewCount||p.videoPlayCount||p.igPlayCount||p.playCount||p.viewsCount||0;
+    return { plataforma:'instagram', vistas:views, likes:p.likesCount||0, compartidos:0, comentarios:p.commentsCount||0, guardados:0, titulo:((p.caption||'')+'').slice(0,80), completo:false };
   }
   return null;
+}
+function batchModal(){
+  const m=document.getElementById('modal');
+  m.innerHTML=`<div class="modal-box" style="max-width:560px">
+    <div class="modal-head"><h3>Registrar varias por links</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="bf"><label>URLs (una por linea, TikTok o Instagram)</label>
+        <textarea id="iBatch" style="width:100%;min-height:130px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:13px"></textarea>
+        <div class="hint">Trae las metricas de todas en paralelo y crea una publicacion por cada una. Luego editas pilar y formato en cada una.</div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="traerLote()" id="loteBtn">Traer y registrar todas</button></div>
+  </div>`;
+  m.classList.remove('hidden');
+}
+async function traerLote(){
+  const urls=document.getElementById('iBatch').value.split('\n').map(x=>x.trim()).filter(x=>/^https?:\/\//.test(x));
+  if(!urls.length){ toast('Pega al menos una URL valida.'); return; }
+  const b=document.getElementById('loteBtn'); b.disabled=true; b.textContent='Trayendo '+urls.length+'... (1-2 min)';
+  try{
+    const results=await Promise.all(urls.map(u=>fetchPostMetrics(u).then(m=>({u,m})).catch(()=>({u,m:null}))));
+    let ok=0;
+    const nuevos=results.filter(r=>r.m).map(r=>{ ok++; return { id:'ins_'+Math.random().toString(36).slice(2,10), url:r.u,
+      titulo:r.m.titulo||'(sin titulo)', pilar:PILARES[0]||'', plataforma:r.m.plataforma, formato:'', fecha:'',
+      vistas:r.m.vistas, guardados:r.m.guardados, compartidos:r.m.compartidos, likes:r.m.likes, comentarios:r.m.comentarios }; });
+    INSIGHTS=[...nuevos,...INSIGHTS];
+    try{ await persistInsights(); }catch(e){}
+    closeModal(); renderInsights();
+    toast('Registradas '+ok+'/'+urls.length+'. Edita cada una para poner pilar y formato.');
+  }catch(e){ toast('Error: '+e.message); b.disabled=false; b.textContent='Traer y registrar todas'; }
 }
 async function traerMetricas(){
   const url=document.getElementById('iUrl').value.trim();
