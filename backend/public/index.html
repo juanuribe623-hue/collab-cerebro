@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Collab Cerebro</title>
+<title>Cerebro Casa Precis - Collab</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root{
@@ -198,7 +198,7 @@
 <!-- ───────── LOGIN ───────── -->
 <div id="login">
   <div class="card">
-    <h1>Collab <span style="color:var(--sky)">Cerebro</span></h1>
+    <h1>Cerebro Casa Precis <span style="color:var(--sky)">Collab</span></h1>
     <p>Tu cerebro de contenido. Inicia sesion.</p>
     <input id="email" type="email" placeholder="correo" autocomplete="username" />
     <input id="password" type="password" placeholder="contraseña" autocomplete="current-password" />
@@ -210,7 +210,7 @@
 <!-- ───────── APP ───────── -->
 <div id="app" class="hidden">
   <aside id="sidebar">
-    <div class="logo">Collab <span>Cerebro</span></div>
+    <div class="logo">Cerebro Casa Precis <span>Collab</span></div>
     <nav>
       <a class="active" data-view="trends" onclick="go('trends')">Banco de Tendencias</a>
       <a data-view="prod" onclick="go('prod')">Produccion</a>
@@ -235,7 +235,8 @@
           <h2>Banco de Tendencias</h2>
           <div class="sub">Tendencias y gaps afines a tu marca. Elige cuales desarrollar, guarda las demas.</div>
         </div>
-        <div style="display:flex;gap:10px">
+        <div style="display:flex;gap:10px;align-items:center">
+          <input id="tendTema" placeholder="Tema opcional (ej: viajes)" style="padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;width:190px" />
           <button class="btn btn-ghost" onclick="generarTendencias()" id="genBtn">Traer tendencias</button>
           <button class="btn btn-primary" onclick="saveTrends()" id="saveBtn">Guardar</button>
         </div>
@@ -634,11 +635,13 @@ async function generarTendencias(){
   const b=document.getElementById('genBtn'); b.disabled=true;
   const restore=()=>{ b.disabled=false; b.textContent='Traer tendencias'; };
   try{
-    // 1) Claude: que buscar (desde el brief)
+    const tema=((document.getElementById('tendTema')||{}).value||'').trim();
+    const temaTxt = tema ? ` El equipo quiere cruzar el tema "${tema}" con el universo de la marca (ademas de sus pilares).` : '';
+    // 1) Claude: que buscar (desde el brief + tema opcional)
     b.textContent='Pensando que buscar...';
     const queries=(await claudeJSON(
       `Generas terminos de busqueda para descubrir contenido REAL en TikTok afin a una marca. Respondes SOLO un array JSON de strings.`,
-      `Marca: ${BRAND_CONTEXT}\n\nDame 3 terminos de busqueda (2 a 4 palabras, en espanol, para Colombia) para encontrar contenido y tendencias reales afines a esta marca en TikTok. Evita repetir enfoques ya existentes: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}. Responde solo el array JSON de strings.`,
+      `Marca: ${BRAND_CONTEXT}${temaTxt}\n\nDame 3 terminos de busqueda (2 a 4 palabras, en espanol, para Colombia) para encontrar contenido y tendencias reales afines a esta marca en TikTok${tema?` conectados al tema "${tema}"`:''}. Evita repetir enfoques ya existentes: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}. Responde solo el array JSON de strings.`,
       600)).slice(0,3);
 
     // 2) Apify: videos reales por termino (en paralelo, tolerante a fallos)
@@ -654,7 +657,7 @@ async function generarTendencias(){
       const evidencia=perQuery.map((pq,i)=>`${i}) "${pq.q}": ${pq.videos.slice(0,6).map(v=>`[${v.vistas} vistas] ${v.desc||''} ${(v.hashtags||[]).map(h=>'#'+h).join(' ')}`).join(' || ')||'(sin resultados)'}`).join('\n');
       arr=await claudeJSON(
         `Eres analista de tendencias. A partir de VIDEOS REALES de TikTok (con vistas, texto y hashtags), identificas tendencias concretas y afines a la marca, sin inventar. Respondes SOLO un array JSON.`,
-        `Marca: ${BRAND_CONTEXT}\n\nEvidencia real de TikTok (numerada por termino):\n${evidencia}\n\nIdentifica 5 tendencias afines a la marca basadas en lo que REALMENTE esta funcionando arriba. Cada objeto: { "titulo","descripcion" (menciona el patron real que ves y por que aplica a la marca),"pilar" (uno de: ${PILARES.join(', ')}),"plataformas" (array con "tiktok" y/o "instagram"),"tipo":"tendencia","tags" (array 2-4),"busqueda" (2-5 palabras para reencontrar ejemplos),"q_index" (numero del termino en el que te basaste) }. Reglas: prohibido em-dash.`,
+        `Marca: ${BRAND_CONTEXT}${temaTxt}\n\nEvidencia real de TikTok (numerada por termino):\n${evidencia}\n\nIdentifica 5 tendencias afines a la marca basadas en lo que REALMENTE esta funcionando arriba.${tema?` Relacionalas con el tema "${tema}" y la marca.`:''} Cada objeto: { "titulo","descripcion" (menciona el patron real que ves y por que aplica a la marca),"pilar" (uno de: ${PILARES.join(', ')}),"plataformas" (array con "tiktok" y/o "instagram"),"tipo":"tendencia","tags" (array 2-4),"busqueda" (2-5 palabras para reencontrar ejemplos),"q_index" (numero del termino en el que te basaste) }. Reglas: prohibido em-dash.`,
         2000);
       arr.forEach(t=>{ const src=perQuery[t.q_index]; t.videos=((src&&src.videos)||[]).slice(0,2).map(vidLite); t.fuente='apify+claude'; delete t.q_index; });
     }else{
@@ -662,7 +665,7 @@ async function generarTendencias(){
       b.textContent='Redes lentas, generando igual...';
       arr=await claudeJSON(
         `Eres el motor de tendencias de una agencia de contenido. Identificas tendencias reales y actuales de redes en Colombia afines a la marca. Respondes SOLO un array JSON.`,
-        `Marca: ${BRAND_CONTEXT}\n\nGenera 5 tendencias afines (mezcla Instagram y TikTok), sin repetir: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}. Cada objeto: { "titulo","descripcion","pilar" (uno de: ${PILARES.join(', ')}),"plataformas" (array),"tipo":"tendencia","tags" (array 2-4),"busqueda" (2-5 palabras) }. Prohibido em-dash.`,
+        `Marca: ${BRAND_CONTEXT}${temaTxt}\n\nGenera 5 tendencias afines (mezcla Instagram y TikTok)${tema?` conectadas al tema "${tema}"`:''}, sin repetir: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}. Cada objeto: { "titulo","descripcion","pilar" (uno de: ${PILARES.join(', ')}),"plataformas" (array),"tipo":"tendencia","tags" (array 2-4),"busqueda" (2-5 palabras) }. Prohibido em-dash.`,
         1500);
       arr.forEach(t=>{ t.fuente='claude'; t.videos=[]; });
     }
@@ -776,8 +779,7 @@ async function escribirGuion(i,btn){
   try{
     const sys=`Eres director creativo y guionista de video corto para una marca de moda y diseno. Escribes guiones LISTOS PARA PRODUCIR: cada linea del guion va acompanada de su TOMA (que se ve en pantalla), mas una lista de tomas clave a grabar y notas de produccion. Suena a persona real hablando. Respondes SOLO un objeto JSON valido, sin texto extra.`;
     const user=`Marca: ${BRAND_CONTEXT}\n\nAngulo: ${a.titulo}. Gancho: ${a.gancho}. Formato: ${a.formato}. Pilar: ${a.pilar}. Tema: ${a._tema}.\n\nEscribe un guion DETALLADO y listo para rodaje, para IG Reel y para TikTok. Nivel de detalle alto, como un guion de produccion con direccion de tomas plano por plano.\nDevuelve objeto JSON con esta forma exacta:\n{\n "titulo",\n "hooks_alt": [2 a 3 hooks alternativos mas fuertes, aplicables a ambas plataformas, que cumplan las reglas de hook],\n "ig": {\n   "ficha": { "formato", "duracion" (ej "30-45s"), "objetivo" },\n   "hook",\n   "guion": [ { "toma": "descripcion visual concreta del plano y la accion (ej: Plano detalle de las manos cosiendo sobre el telar)", "texto": "lo que se dice en voz en off o aparece en pantalla en ese plano" } ]  (entre 5 y 8 beats),\n   "cierre",\n   "tomas": [ "lista de 4 a 7 tomas clave a grabar, cada una con tipo de plano" ],\n   "notas": [ "3 a 5 notas de produccion: locacion, props, styling, ritmo, luz, musica" ],\n   "guardar_compartir" (frase corta, natural y bien ubicada para motivar guardar el video y enviarselo a alguien especifico), "caption", "hashtags" (array 5-8 sin #), "cta"\n },\n "tiktok": { "ficha": {"formato","duracion","objetivo"}, "hook", "guion": [ {"toma","texto"} ] (entre 4 y 7 beats, mas rapido y nativo), "cierre", "tomas": [...], "audio" (sugerencia concreta de sonido o tendencia sonora), "notas": [...], "guardar_compartir" (frase corta, natural y bien ubicada para motivar guardar el video y enviarselo a alguien especifico), "caption", "hashtags" (array 5-8 sin #), "cta" }\n}\nReglas: espanol colombiano natural y humano, hook fuerte en los primeros 3s, nunca nombrar competencia directa (usa "la otra marca", "lo que todos compran"), cierre emocional, prohibido usar guion largo (em-dash). Las tomas deben ser concretas y grabables, no genericas. Reglas de hook para el "hook" y los "hooks_alt": ${HOOK_DOCTRINE} El objetivo de engagement son los GUARDADOS y COMPARTIDOS (no los likes): el campo "guardar_compartir" debe ser una frase organica que invite a guardar y a enviar el video a alguien especifico (ej: "guardalo para tu proxima...", "enviaselo a esa amiga que..."), nunca "dale like".`;
-    const r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:3500,system:sys,messages:[{role:'user',content:user}]}});
-    const s=JSON.parse((r.content?.[0]?.text||'').replace(/```json|```/g,'').trim());
+    const s=await claudeJSON(sys,user,8000);
     s.angulo=a.titulo; s.pilar=a.pilar; s.tema=a._tema;
     s.plataformas=(a.plataformas&&a.plataformas.length)?a.plataformas:['instagram','tiktok'];
     CURRENT=s; openScript(s,'new');
@@ -1035,6 +1037,7 @@ async function correrRadar(){
   const b=document.getElementById('radarBtn'); b.disabled=true;
   const restore=()=>{ b.disabled=false; b.textContent='Correr radar'; };
   try{
+    // (radar)
     const manual=document.getElementById('radarTerm').value.trim();
     let queries;
     if(manual){ queries=[manual]; }
