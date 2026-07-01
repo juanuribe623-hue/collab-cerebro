@@ -377,7 +377,10 @@
           <h2>Calendario</h2>
           <div class="sub">Programa tu contenido por pilar. Las alarmas te avisan si descuidas algun pilar de la marca.</div>
         </div>
-        <button class="btn btn-primary" onclick="nuevoEntry('')">Agregar contenido</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="plannerModal()">Planear mes (IA)</button>
+          <button class="btn btn-primary" onclick="nuevoEntry('')">Agregar contenido</button>
+        </div>
       </div>
       <div id="balance" class="balance"></div>
       <div class="cal-nav">
@@ -434,6 +437,7 @@ let RADAR = [];         // creadores emergentes descubiertos (efimero en v1)
 let WATCHLIST = [];     // creadores en seguimiento (con snapshots)
 let CALENDAR = [];      // piezas del calendario de contenido
 let calYear, calMonth;  // mes visible
+let PLAN = [];          // plan mensual propuesto por el planner (efimero)
 let INSIGHTS = [];      // publicaciones registradas con performance
 // Doctrina de hooks compartida: la usan el escritor de guiones y el optimizador (misma vara)
 const HOOK_DOCTRINE = "Reglas de hook para maximizar guardados y compartidos: (1) el hook vive en los primeros 3 segundos; (2) primero crea tension, escena o pregunta, y solo despues el gancho de accion (nunca pidas accion antes de enganchar); (3) mete un detalle de utilidad concreta que invite a guardar (ej: 'guardalo para...'); (4) activa identidad de grupo para el compartido (ej: 'las que...'); (5) prefiere especificidad sensorial sobre lo generico.";
@@ -1289,6 +1293,69 @@ async function deleteEntry(id){
   CALENDAR=CALENDAR.filter(e=>e.id!==id);
   try{ await persistCalendar(); }catch(e){}
   closeModal(); renderCalendar(); toast('Eliminado.');
+}
+
+// ── Planner mensual (IA) ──
+function plannerModal(){
+  const m=document.getElementById('modal');
+  m.innerHTML=`<div class="modal-box" style="max-width:560px">
+    <div class="modal-head"><h3>Planear mes con IA</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="bf"><label>Mes objetivo</label><div class="fv">${MESES[calMonth]} ${calYear} <span style="color:var(--gray);font-size:12px">(cambialo con las flechas del calendario)</span></div></div>
+      <div class="bf"><label>Posts por semana</label><input type="number" min="1" max="21" id="plCad" value="4" /></div>
+      <div class="bf"><label>% Reels (el resto son carruseles)</label><input type="number" min="0" max="100" id="plReels" value="60" /></div>
+      <div class="bf"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="plIns" checked style="width:auto" /> Priorizar lo que funciona (Insights)</label></div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="generarPlan()" id="plBtn">Generar plan</button></div>
+  </div>`;
+  m.classList.remove('hidden');
+}
+async function generarPlan(){
+  const cad=+document.getElementById('plCad').value||4;
+  const reels=+document.getElementById('plReels').value||60;
+  const useIns=document.getElementById('plIns').checked;
+  const b=document.getElementById('plBtn'); b.disabled=true; b.textContent='Generando...';
+  try{
+    let insTxt='';
+    if(useIns && INSIGHTS.length){
+      const r=rankBy('pilar').slice(0,3).map(x=>x.k+' ('+(x.rate*100).toFixed(0)+'%)').join(', ');
+      if(r) insTxt=` Prioriza los pilares que mas generan guardados y compartidos segun datos reales: ${r}.`;
+    }
+    const dias=new Date(calYear,calMonth+1,0).getDate();
+    const plan=await claudeJSON(
+      `Eres planner de contenido. Distribuyes el mes de forma equilibrada entre formatos y pilares, respetando la cadencia. Respondes SOLO un objeto JSON.`,
+      `Marca: ${BRAND_CONTEXT}\nPilares: ${PILARES.join(', ')}.\nMes objetivo: ${MESES[calMonth]} ${calYear} (${dias} dias).\nCadencia: ~${cad} posts por semana. Mezcla de formatos: ~${reels}% Reels, el resto Carruseles.${insTxt}\n\nGenera un plan mensual: reparte las piezas en fechas concretas dentro del mes, bien distribuidas (no todas el mismo dia), equilibrando los pilares (que ninguno quede sin contenido) y respetando la mezcla de formatos. Devuelve JSON: { "resumen": "una linea con la logica del plan", "plan": [ { "fecha": "YYYY-MM-DD dentro del mes", "formato": "Reel"|"Carrusel"|"Historia", "pilar": "uno de los pilares", "idea": "idea corta y accionable en espanol colombiano" } ] }. Prohibido em-dash.`,
+      3000);
+    PLAN=(plan.plan||[]).filter(x=>x&&x.fecha);
+    renderPlanPreview(plan.resumen||'');
+  }catch(e){ toast('Error generando plan: '+e.message); b.disabled=false; b.textContent='Generar plan'; }
+}
+function renderPlanPreview(resumen){
+  const m=document.getElementById('modal');
+  const rows=PLAN.map(p=>`<div style="margin-bottom:10px">
+    <div class="ins-rank"><span><b>${esc(p.fecha)}</b> · ${esc(p.formato||'')} · ${esc(p.pilar||'')}</span></div>
+    <div class="crit-x">${esc(p.idea||'')}</div></div>`).join('');
+  m.innerHTML=`<div class="modal-box">
+    <div class="modal-head"><h3>Plan propuesto (${PLAN.length} piezas)</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">${resumen?`<div class="ficha">${esc(resumen)}</div>`:''}${rows||'<div class="empty">Sin piezas.</div>'}</div>
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="plannerModal()">Volver</button><button class="btn btn-primary" onclick="cargarPlan()">Cargar al calendario</button></div>
+  </div>`;
+}
+async function cargarPlan(){
+  if(!PLAN.length){ toast('No hay plan que cargar.'); return; }
+  const nuevos=PLAN.map(p=>({
+    id:'cal_'+Math.random().toString(36).slice(2,10),
+    fecha:p.fecha,
+    titulo:(p.formato?p.formato+': ':'')+(p.idea||'(sin titulo)'),
+    pilar:p.pilar||PILARES[0]||'',
+    plataforma:(p.formato==='Reel')?'ambas':'instagram',
+    estado:'idea'
+  }));
+  CALENDAR=[...CALENDAR,...nuevos];
+  try{ await persistCalendar(); }catch(e){ toast('Error: '+e.message); }
+  const f=(PLAN[0].fecha||'').split('-'); if(f.length===3){ calYear=+f[0]; calMonth=+f[1]-1; }
+  closeModal(); renderCalendar();
+  toast('Cargadas '+nuevos.length+' piezas al calendario.');
 }
 
 // ───────── Insights ─────────
