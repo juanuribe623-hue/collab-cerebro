@@ -401,6 +401,7 @@
           <div class="sub">Programa tu contenido por pilar. Las alarmas te avisan si descuidas algun pilar de la marca.</div>
         </div>
         <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="importModal()">Importar (pegar)</button>
           <button class="btn btn-ghost" onclick="plannerModal()">Planear mes (IA)</button>
           <button class="btn btn-primary" onclick="nuevoEntry('')">Agregar contenido</button>
         </div>
@@ -1406,6 +1407,83 @@ async function deleteEntry(id){
   CALENDAR=CALENDAR.filter(e=>e.id!==id);
   try{ await persistCalendar(); }catch(e){}
   closeModal(); renderCalendar(); toast('Eliminado.');
+}
+
+// ── Importar mes (pegar desde Excel) ──
+function importModal(){
+  const m=document.getElementById('modal');
+  m.innerHTML=`<div class="modal-box" style="max-width:640px">
+    <div class="modal-head"><h3>Importar contenido del mes</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="bf"><label>Pega las filas de tu Excel (incluye la fila de titulos)</label>
+        <textarea id="impData" style="width:100%;min-height:180px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:ui-monospace,monospace;font-size:12px"></textarea>
+        <div class="hint">En Excel selecciona desde la fila de titulos (Dia, Fecha, Pilar, ...) hacia abajo, copia (Cmd+C) y pega aqui. Reconoce las columnas por su nombre.</div>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="impReplace" style="width:auto" /> Reemplazar las piezas ya existentes de esos meses</label>
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="importarCalendario()" id="impBtn">Importar</button></div>
+  </div>`;
+  m.classList.remove('hidden');
+}
+async function importarCalendario(){
+  const raw=document.getElementById('impData').value||'';
+  const replace=document.getElementById('impReplace').checked;
+  const lines=raw.split(/\r?\n/).filter(l=>l.trim());
+  if(lines.length<2){ toast('Pega la fila de titulos y al menos una fila de datos.'); return; }
+  let hi=lines.findIndex(l=>/fecha/i.test(l)&&/pilar/i.test(l)); if(hi<0) hi=0;
+  const headers=lines[hi].split('\t').map(h=>h.trim().toLowerCase());
+  const map={};
+  headers.forEach((h,i)=>{
+    if(/fecha/.test(h)) map.fecha=i;
+    else if(/d[ií]a/.test(h)) map.dia=i;
+    else if(/cap[ií]tulo|semana.*cap/.test(h)) map.capitulo=i;
+    else if(/^semana/.test(h)) map.semana=i;
+    else if(/campa/.test(h)) map.campana=i;
+    else if(/pilar/.test(h)) map.pilar=i;
+    else if(/estado/.test(h)) map.estado=i;
+    else if(/objetivo/.test(h)) map.objetivo=i;
+    else if(/formato/.test(h)) map.formato=i;
+    else if(/canal/.test(h)) map.canal=i;
+    else if(/marca/.test(h)) map.marcas=i;
+    else if(/idea/.test(h)) map.idea=i;
+    else if(/ref|link/.test(h)) map.ref=i;
+    else if(/hook/.test(h)) map.hook=i;
+    else if(/caption/.test(h)) map.caption=i;
+    else if(/cta/.test(h)) map.cta=i;
+    else if(/nota/.test(h)) map.notas=i;
+  });
+  if(map.fecha==null){ toast('No encontre la columna Fecha en los titulos.'); return; }
+  const MES={ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12};
+  const pf=s=>{ s=(s||'').trim(); if(!s) return null;
+    let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return m[1]+'-'+m[2]+'-'+m[3];
+    m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/); if(m){ const y=m[3].length===2?'20'+m[3]:m[3]; return y+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[1]).padStart(2,'0'); }
+    m=s.toLowerCase().match(/(\d{1,2})[-\/ ]([a-z]{3})/); if(m){ const mo=MES[m[2]]||(calMonth+1); return calYear+'-'+String(mo).padStart(2,'0')+'-'+String(m[1]).padStart(2,'0'); }
+    return null;
+  };
+  const cell=(cols,i)=> (i!=null && cols[i]!=null)? String(cols[i]).trim() : '';
+  let sem=''; const nuevos=[];
+  for(let k=hi+1;k<lines.length;k++){
+    const cols=lines[k].split('\t');
+    if(map.semana!=null && cell(cols,map.semana)) sem=cell(cols,map.semana);
+    const fecha=pf(cell(cols,map.fecha)); if(!fecha) continue;
+    const idea=cell(cols,map.idea);
+    nuevos.push({ id:'cal_'+Math.random().toString(36).slice(2,10), fecha,
+      dia:cell(cols,map.dia), semana:sem, capitulo:cell(cols,map.capitulo), campana:cell(cols,map.campana),
+      pilar:cell(cols,map.pilar), estado:cell(cols,map.estado)||'Pendiente', objetivo:cell(cols,map.objetivo),
+      formato:cell(cols,map.formato), canal:cell(cols,map.canal), marcas:cell(cols,map.marcas),
+      idea, ref:cell(cols,map.ref), hook:cell(cols,map.hook), caption:cell(cols,map.caption),
+      cta:cell(cols,map.cta), notas:cell(cols,map.notas), titulo:(idea||'(sin titulo)') });
+  }
+  if(!nuevos.length){ toast('No pude leer filas con fecha valida.'); return; }
+  if(replace){
+    const meses=new Set(nuevos.map(n=>n.fecha.slice(0,7)));
+    CALENDAR=CALENDAR.filter(e=>!meses.has((e.fecha||'').slice(0,7)));
+  }
+  CALENDAR=[...CALENDAR,...nuevos];
+  try{ await persistCalendar(); }catch(e){ toast('Error guardando: '+e.message); return; }
+  const f=nuevos[0].fecha.split('-'); calYear=+f[0]; calMonth=+f[1]-1;
+  closeModal(); renderCalendar();
+  toast('Importadas '+nuevos.length+' piezas.');
 }
 
 // ── Planner mensual (IA) ──
