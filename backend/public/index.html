@@ -856,7 +856,7 @@ function openScript(s,mode){
       ${platBlock('ig','Instagram Reel',s.ig||{},s)}
       ${platBlock('tt','TikTok',s.tiktok||{},s)}
     </div>${(s.hooks_alt&&s.hooks_alt.length)?`<div class="fld" style="margin-top:16px"><div class="fl">Hooks alternativos (elige el mas fuerte)</div>${s.hooks_alt.map(h=>`<div class="gbeat"><div class="gtexto">${esc(h)}</div></div>`).join('')}</div>`:''}</div>
-    <div class="modal-foot">${mode==='new'
+    <div class="modal-foot"><button class="btn btn-ghost" onclick="descargarWord()">Descargar Word</button>${mode==='new'
       ? '<button class="btn btn-ghost" onclick="closeModal()">Descartar</button><button class="btn btn-primary" onclick="guardarGuion()">Guardar en biblioteca</button>'
       : '<button class="btn btn-ghost" onclick="borrarGuion(\''+s.id+'\')">Eliminar</button><button class="btn btn-primary" onclick="closeModal()">Cerrar</button>'}</div>
   </div>`;
@@ -890,6 +890,42 @@ function platBlock(cls,name,p,s){
 function utmFor(plat,s){
   const slug=(s.tema||s.titulo||'contenido').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40);
   return `casaprecis.com?utm_source=${plat}&utm_medium=organico&utm_campaign=${slug}&utm_content=${plat==='tiktok'?'tiktok':'reel'}`;
+}
+
+// Descarga del guion como Word (.doc via HTML compatible con Word, editable)
+function guionPlatHtml(name,p,plat,s){
+  if(!p) return '';
+  const beats=(p.guion&&p.guion.length)
+    ? p.guion.map(b=>`<p><b>Toma:</b> ${esc(b.toma||'')}<br/><b>Texto:</b> ${esc(b.texto||'')}</p>`).join('')
+    : (p.desarrollo||[]).map(x=>`<p>${esc(x)}</p>`).join('');
+  return `<h2>${name}${(p.ficha&&p.ficha.duracion)?' ('+esc(p.ficha.duracion)+')':''}</h2>
+    ${p.ficha?`<p><i>Formato: ${esc(p.ficha.formato||'')} - Objetivo: ${esc(p.ficha.objetivo||'')}</i></p>`:''}
+    <p><b>Hook (0-3s):</b> ${esc(p.hook||'')}</p>
+    <p><b>Guion:</b></p>${beats||'<p>-</p>'}
+    <p><b>Cierre:</b> ${esc(p.cierre||'')}</p>
+    ${(p.tomas&&p.tomas.length)?`<p><b>Tomas a grabar:</b></p><ul>${p.tomas.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
+    ${p.audio?`<p><b>Audio sugerido:</b> ${esc(p.audio)}</p>`:''}
+    ${(p.notas&&p.notas.length)?`<p><b>Notas de produccion:</b></p><ul>${p.notas.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
+    <p><b>Caption:</b> ${esc(p.caption||'')}</p>
+    <p><b>Hashtags:</b> ${(p.hashtags||[]).map(h=>'#'+String(h).replace(/^#/,'')).join(' ')}</p>
+    <p><b>CTA:</b> ${esc(p.cta||'')}</p>
+    ${p.guardar_compartir?`<p><b>Guardar + compartir:</b> ${esc(p.guardar_compartir)}</p>`:''}
+    <p><b>UTM:</b> ${esc(utmFor(plat,s))}</p>`;
+}
+function descargarWord(){
+  const s=CURRENT; if(!s) return;
+  const alt=(s.hooks_alt&&s.hooks_alt.length)?`<h2>Hooks alternativos</h2><ul>${s.hooks_alt.map(h=>`<li>${esc(h)}</li>`).join('')}</ul>`:'';
+  const html=`<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"></head><body>
+    <h1>${esc(s.titulo||'Guion')}</h1>
+    ${guionPlatHtml('Instagram Reel',s.ig,'instagram',s)}
+    ${guionPlatHtml('TikTok',s.tiktok,'tiktok',s)}
+    ${alt}
+  </body></html>`;
+  const blob=new Blob(['﻿'+html],{type:'application/msword'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url;
+  const slug=(s.titulo||'guion').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,50);
+  a.download='Guion-'+(slug||'casa-precis')+'.doc'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 
 async function guardarGuion(){
@@ -1304,24 +1340,37 @@ function calPrev(){ calMonth--; if(calMonth<0){ calMonth=11; calYear--; } render
 function calNext(){ calMonth++; if(calMonth>11){ calMonth=0; calYear++; } renderCalendar(); }
 function calHoy(){ const d=new Date(); calYear=d.getFullYear(); calMonth=d.getMonth(); renderCalendar(); }
 
-function nuevoEntry(fecha){ entryModal({ fecha:fecha||'', pilar:PILARES[0]||'', plataforma:'instagram', estado:'idea' }); }
+function nuevoEntry(fecha){ entryModal({ fecha:fecha||'', pilar:PILARES[0]||'', estado:'Pendiente', formato:'Reel', canal:'Instagram', objetivo:'Branding' }); }
 function openEntry(id){ const e=CALENDAR.find(x=>x.id===id); if(e) entryModal(e); }
+function selOpts(vals,cur){ return vals.map(v=>`<option ${cur===v?'selected':''}>${esc(v)}</option>`).join(''); }
 function entryModal(e){
   const isNew=!e.id;
-  const pilOpts=PILARES.map(p=>`<option ${e.pilar===p?'selected':''}>${esc(p)}</option>`).join('');
   const scrOpts=SCRIPTS.map(s=>`<option value="${s.id}">${esc(s.titulo||'')}</option>`).join('');
-  const plats=['instagram','tiktok','ambas'].map(p=>`<option ${e.plataforma===p?'selected':''}>${p}</option>`).join('');
-  const ests=[['idea','Idea'],['produccion','En produccion'],['listo','Listo'],['publicado','Publicado']].map(x=>`<option value="${x[0]}" ${e.estado===x[0]?'selected':''}>${x[1]}</option>`).join('');
   const m=document.getElementById('modal');
-  m.innerHTML=`<div class="modal-box" style="max-width:520px">
+  m.innerHTML=`<div class="modal-box" style="max-width:660px">
     <div class="modal-head"><h3>${isNew?'Nueva pieza':'Editar pieza'}</h3><button class="x" onclick="closeModal()">×</button></div>
     <div class="modal-body">
       ${SCRIPTS.length?`<div class="bf"><label>Desde un guion guardado (opcional)</label><select id="eScript" onchange="prefillFromScript()"><option value="">-</option>${scrOpts}</select></div>`:''}
-      <div class="bf"><label>Fecha</label><input type="date" id="eFecha" value="${e.fecha||''}" /></div>
-      <div class="bf"><label>Titulo</label><input id="eTitulo" value="${esc(e.titulo||'')}" /></div>
-      <div class="bf"><label>Pilar</label><select id="ePilar">${pilOpts}</select></div>
-      <div class="bf"><label>Plataforma</label><select id="ePlat">${plats}</select></div>
-      <div class="bf"><label>Estado</label><select id="eEstado">${ests}</select></div>
+      <div class="plats">
+        <div class="bf"><label>Fecha</label><input type="date" id="eFecha" value="${e.fecha||''}" /></div>
+        <div class="bf"><label>Estado</label><select id="eEstado">${selOpts(['Pendiente','En proceso','Publicado','Idea'], e.estado||'Pendiente')}</select></div>
+        <div class="bf"><label>Pilar</label><select id="ePilar">${PILARES.map(p=>`<option ${e.pilar===p?'selected':''}>${esc(p)}</option>`).join('')}</select></div>
+        <div class="bf"><label>Formato</label><select id="eFormato">${selOpts(['Reel','Carrusel','Stories','Post'], e.formato||'Reel')}</select></div>
+        <div class="bf"><label>Canal</label><select id="eCanal">${selOpts(['Instagram','TikTok','Instagram+TikTok'], e.canal||'Instagram')}</select></div>
+        <div class="bf"><label>Objetivo</label><select id="eObjetivo">${selOpts(['Branding','Alcance','Engagement','Conversion','Venta soft'], e.objetivo||'Branding')}</select></div>
+        <div class="bf"><label>Semana</label><input id="eSemana" value="${esc(e.semana||'')}" placeholder="ej: SEMANA 1" /></div>
+        <div class="bf"><label>Capitulo</label><input id="eCapitulo" value="${esc(e.capitulo||'')}" placeholder="ej: Cap.1 El viaje comienza" /></div>
+        <div class="bf"><label>Campana</label><input id="eCampana" value="${esc(e.campana||'')}" /></div>
+        <div class="bf"><label>Marcas</label><input id="eMarcas" value="${esc(e.marcas||'')}" /></div>
+      </div>
+      <div class="bf"><label>Idea</label><textarea id="eIdea" rows="2">${esc(e.idea||e.titulo||'')}</textarea></div>
+      <div class="bf"><label>Hook</label><textarea id="eHook" rows="2">${esc(e.hook||'')}</textarea></div>
+      <div class="bf"><label>Caption</label><textarea id="eCaption" rows="3">${esc(e.caption||'')}</textarea></div>
+      <div class="plats">
+        <div class="bf"><label>CTA</label><input id="eCta" value="${esc(e.cta||'')}" /></div>
+        <div class="bf"><label>Ref / Link</label><input id="eRef" value="${esc(e.ref||'')}" /></div>
+      </div>
+      <div class="bf"><label>Notas</label><textarea id="eNotas" rows="2">${esc(e.notas||'')}</textarea></div>
     </div>
     <div class="modal-foot">
       ${isNew?'':('<button class="btn btn-ghost" onclick="deleteEntry(\''+e.id+'\')">Eliminar</button>')}
@@ -1332,15 +1381,22 @@ function entryModal(e){
 }
 function prefillFromScript(){
   const s=SCRIPTS.find(x=>x.id===document.getElementById('eScript').value); if(!s) return;
-  document.getElementById('eTitulo').value=s.titulo||'';
+  const set=(id,v)=>{const el=document.getElementById(id); if(el&&v!=null) el.value=v;};
+  set('eIdea', s.titulo||'');
   if(s.pilar && PILARES.includes(s.pilar)) document.getElementById('ePilar').value=s.pilar;
-  if(s.plataformas&&s.plataformas.length) document.getElementById('ePlat').value=(s.plataformas.length>1?'ambas':s.plataformas[0]);
+  if(s.plataformas&&s.plataformas.length) document.getElementById('eCanal').value=(s.plataformas.length>1?'Instagram+TikTok':(s.plataformas[0]==='tiktok'?'TikTok':'Instagram'));
+  if(s.ig){ set('eHook',s.ig.hook); set('eCaption',s.ig.caption); set('eCta',s.ig.cta); }
 }
 async function saveEntry(id){
-  const val=x=>document.getElementById(x).value;
+  const val=x=>{const el=document.getElementById(x);return el?el.value:'';};
   const fecha=val('eFecha'); if(!fecha){ toast('Elige una fecha.'); return; }
+  const idea=val('eIdea').trim();
   const obj={ id:id||('cal_'+Math.random().toString(36).slice(2,10)), fecha,
-    titulo:(val('eTitulo').trim()||'(sin titulo)'), pilar:val('ePilar'), plataforma:val('ePlat'), estado:val('eEstado') };
+    semana:val('eSemana').trim(), capitulo:val('eCapitulo').trim(), campana:val('eCampana').trim(),
+    pilar:val('ePilar'), estado:val('eEstado'), objetivo:val('eObjetivo'), formato:val('eFormato'), canal:val('eCanal'),
+    marcas:val('eMarcas').trim(), idea:idea, ref:val('eRef').trim(), hook:val('eHook').trim(),
+    caption:val('eCaption').trim(), cta:val('eCta').trim(), notas:val('eNotas').trim(),
+    titulo:(idea||'(sin titulo)') };
   const sc=document.getElementById('eScript'); if(sc&&sc.value) obj.script_id=sc.value;
   CALENDAR = id ? CALENDAR.map(e=>e.id===id?obj:e) : [...CALENDAR,obj];
   try{ await persistCalendar(); }catch(e){ toast('Error: '+e.message); }
@@ -1402,11 +1458,10 @@ async function cargarPlan(){
   if(!PLAN.length){ toast('No hay plan que cargar.'); return; }
   const nuevos=PLAN.map(p=>({
     id:'cal_'+Math.random().toString(36).slice(2,10),
-    fecha:p.fecha,
-    titulo:(p.formato?p.formato+': ':'')+(p.idea||'(sin titulo)'),
-    pilar:p.pilar||PILARES[0]||'',
-    plataforma:(p.formato==='Reel')?'ambas':'instagram',
-    estado:'idea'
+    fecha:p.fecha, idea:(p.idea||''), titulo:(p.idea||'(sin titulo)'),
+    pilar:p.pilar||PILARES[0]||'', formato:p.formato||'Reel',
+    canal:(p.formato==='Reel')?'Instagram+TikTok':'Instagram',
+    estado:'Pendiente', objetivo:'', campana:'', semana:'', capitulo:'', marcas:'', hook:'', caption:'', cta:'', ref:'', notas:''
   }));
   CALENDAR=[...CALENDAR,...nuevos];
   try{ await persistCalendar(); }catch(e){ toast('Error: '+e.message); }
