@@ -54,6 +54,10 @@
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
   .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(30,58,138,.05)}
   .card h3{color:var(--navy);font-size:15px;margin-bottom:8px}
+  .trend-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px}
+  .trend-head h3{margin-bottom:0}
+  .save-star{background:none;border:none;font-size:20px;line-height:1;padding:0 2px;color:#c9b458;cursor:pointer;flex-shrink:0}
+  .save-star.on{color:#e0a800}
   .card .desc{color:var(--gray);font-size:13px;line-height:1.45;margin-bottom:10px}
   .badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
   .badge{font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px}
@@ -241,7 +245,7 @@
       <div class="head">
         <div>
           <h2>Banco de Tendencias</h2>
-          <div class="sub">Tendencias y gaps afines a tu marca. Elige cuales desarrollar, guarda las demas.</div>
+          <div class="sub">Marca con la estrella (☆) las que te sirvan: al traer mas inspiracion, las guardadas y en uso se conservan.</div>
         </div>
         <div style="display:flex;gap:10px;align-items:center">
           <input id="tendTema" placeholder="Tema opcional (ej: viajes)" style="padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;width:190px" />
@@ -625,7 +629,7 @@ function renderTrends(){
         <span class="badge ${ (t.tipo==='gap')?'b-gap':'b-pilar'}">${t.tipo==='gap'?'GAP':(t.pilar||'tendencia')}</span>
         ${(t.plataformas||[]).map(p=>`<span class="badge b-plat">${p}</span>`).join('')}
       </div>
-      <h3>${esc(t.titulo||'(sin titulo)')}</h3>
+      <div class="trend-head"><h3>${esc(t.titulo||'(sin titulo)')}</h3><button class="save-star ${estado==='guardada'?'on':''}" onclick="setEstado('${t.id}','guardada')" title="Guardar esta tendencia como inspiracion (se conserva al traer mas)">${estado==='guardada'?'★':'☆'}</button></div>
       <div class="desc">${esc(t.descripcion||'')}</div>
       ${tags?`<div class="badges">${tags}</div>`:''}
       <div class="videos"><div class="vt">Ejemplos con impacto real</div>${videos||'<div style="font-size:12px;color:var(--gray);margin-bottom:6px">Aun sin ejemplos.</div>'}<div style="display:flex;gap:6px;margin-top:2px"><button class="est-btn" onclick="buscarEjemplos('${t.id}',this)">Buscar ejemplos en TikTok</button></div></div>
@@ -699,11 +703,13 @@ async function generarTendencias(){
   try{
     const tema=((document.getElementById('tendTema')||{}).value||'').trim();
     const temaTxt = tema ? ` El equipo quiere cruzar el tema "${tema}" con el universo de la marca (ademas de sus pilares).` : '';
+    // Al regenerar: conservamos las guardadas (estrella) y en uso; el resto se refresca con inspiracion nueva
+    const keep = TRENDS.filter(t=>t.estado==='guardada'||t.estado==='en_uso');
     // 1) Claude: que buscar (desde el brief + tema opcional)
     b.textContent='Pensando que buscar...';
     const queries=(await claudeJSON(
       `Generas terminos de busqueda para descubrir contenido REAL en TikTok afin a una marca. Respondes SOLO un array JSON de strings.`,
-      `Marca: ${BRAND_CONTEXT}${temaTxt}\n\nDame 3 terminos de busqueda (2 a 4 palabras, en espanol, para Colombia) para encontrar contenido y tendencias reales afines a esta marca en TikTok${tema?` conectados al tema "${tema}"`:''}. Evita repetir enfoques ya existentes: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}. Responde solo el array JSON de strings.`,
+      `Marca: ${BRAND_CONTEXT}${temaTxt}\n\nDame 3 terminos de busqueda (2 a 4 palabras, en espanol, para Colombia) para encontrar contenido y tendencias reales afines a esta marca en TikTok${tema?` conectados al tema "${tema}"`:''}. Evita repetir enfoques ya existentes: ${keep.map(t=>t.titulo).join(' | ')||'(ninguna)'}. Responde solo el array JSON de strings.`,
       600)).slice(0,3);
 
     // 2) Apify: videos reales por termino (en paralelo, tolerante a fallos)
@@ -727,13 +733,13 @@ async function generarTendencias(){
       b.textContent='Redes lentas, generando igual...';
       arr=await claudeJSON(
         `Eres el motor de tendencias de una agencia de contenido. Identificas tendencias reales y actuales de redes en Colombia afines a la marca. Respondes SOLO un array JSON.`,
-        `Marca: ${BRAND_CONTEXT}${temaTxt}\n\nGenera 5 tendencias afines (mezcla Instagram y TikTok)${tema?` conectadas al tema "${tema}"`:''}, sin repetir: ${TRENDS.map(t=>t.titulo).join(' | ')||'(ninguna)'}. Cada objeto: { "titulo","descripcion","pilar" (uno de: ${PILARES.join(', ')}),"plataformas" (array),"tipo":"tendencia","tags" (array 2-4),"busqueda" (2-5 palabras) }. Prohibido em-dash.`,
+        `Marca: ${BRAND_CONTEXT}${temaTxt}\n\nGenera 5 tendencias afines (mezcla Instagram y TikTok)${tema?` conectadas al tema "${tema}"`:''}, sin repetir: ${keep.map(t=>t.titulo).join(' | ')||'(ninguna)'}. Cada objeto: { "titulo","descripcion","pilar" (uno de: ${PILARES.join(', ')}),"plataformas" (array),"tipo":"tendencia","tags" (array 2-4),"busqueda" (2-5 palabras) }. Prohibido em-dash.`,
         1500);
       arr.forEach(t=>{ t.fuente='claude'; t.videos=[]; });
     }
 
     arr.forEach(t=>{ t.id='trend_'+Math.random().toString(36).slice(2,10); t.estado='nueva'; t.creado_en=now; t.videos=t.videos||[]; });
-    TRENDS=[...arr,...TRENDS];
+    TRENDS=[...arr,...keep];
     renderTrends(); persistTrends();
     toast(totalVids>0 ? ('Generadas '+arr.length+' tendencias desde '+totalVids+' videos reales.')
                       : ('Apify lento; generadas '+arr.length+' con Claude. Usa "Buscar en TikTok" en cada una.'));
