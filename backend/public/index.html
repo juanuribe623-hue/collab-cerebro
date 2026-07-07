@@ -202,7 +202,7 @@
     descripcion: "Concept store de alto diseno colombiano, 120+ disenadores, tiendas en Bogota y Cartagena.",
     voz: "Femenina, calida, literaria, muy de aqui, orgullo colombiano. Conversacional, nunca corporativa.",
     audiencia: "Mayoritariamente mujeres, amantes del diseno y de lo hecho en Colombia.",
-    pilares: ["Conoce al disenador","Identidad muy de aqui","Curaduria con criterio","Styling y guias","Colaboraciones/UGC","Founder y detras de camaras","Venta/eventos"],
+    pilares: ["Conoce al disenador","Identidad muy de aqui","Curaduria con criterio","Styling y guias","Colaboraciones/UGC","Founder y detras de camaras","Venta/eventos","Financiacion con Addi"],
     reglas: "Nunca nombrar competencia directa (usar 'la otra marca'). Prohibido em-dash. Datos reales sobre opiniones. Tono humano.",
     objetivo_engagement: "Optimizar para guardados y compartidos, no likes."
   };
@@ -471,6 +471,8 @@ let PLAN = [];          // plan mensual propuesto por el planner (efimero)
 let INSIGHTS = [];      // publicaciones registradas con performance
 // Doctrina de hooks compartida: la usan el escritor de guiones y el optimizador (misma vara)
 const HOOK_DOCTRINE = "Reglas de hook para maximizar guardados y compartidos: (1) el hook vive en los primeros 3 segundos; (2) primero crea tension, escena o pregunta, y solo despues el gancho de accion (nunca pidas accion antes de enganchar); (3) mete un detalle de utilidad concreta que invite a guardar (ej: 'guardalo para...'); (4) activa identidad de grupo para el compartido (ej: 'las que...'); (5) prefiere especificidad sensorial sobre lo generico.";
+const ADDI_DOCTRINE = "Este pilar es de FINANCIACION con Addi: es una palanca de conversion, no un descuento. Reglas obligatorias: (1) Addi entra como facilitador con la voz editorial de la marca, nunca como grito de oferta ni promocion; (2) mensaje permitido siempre: 'llevalo hoy y pagalo a cuotas con Addi'; (3) PROHIBIDO decir 'sin intereses' o prometer una tasa especifica salvo confirmacion escrita de Addi: ante la duda, habla de cuotas, no de intereses; (4) la pieza sigue siendo la protagonista, Addi es solo la razon por la que hoy si se puede; (5) nunca poner precios ni porcentajes en pantalla; (6) en frio Addi entra suave al cierre, en retargeting Addi puede ser protagonista como respuesta a la objecion de precio.";
+function esPilarFinanciacion(p){ return /financ|addi/i.test(p||''); }
 const BF_CRITERIOS=[
   {key:'audiencia',   label:'Audiencia objetivo',           def:30},
   {key:'credibilidad',label:'Credibilidad en la categoria', def:25},
@@ -535,6 +537,7 @@ async function loadBrief(){
 }
 function applyBrief(){
   PILARES = (BRIEF.pilares&&BRIEF.pilares.length)?BRIEF.pilares.slice():DEFAULT_BRIEF.pilares.slice();
+  if(!PILARES.some(esPilarFinanciacion)) PILARES.push("Financiacion con Addi");  // pilar de conversion, siempre disponible en la parrilla
   BRAND_CONTEXT = briefToContext(BRIEF);
   BF_PESOS = (BRIEF.brandfit_pesos && Object.keys(BRIEF.brandfit_pesos).length) ? {...defaultPesos(), ...BRIEF.brandfit_pesos} : defaultPesos();
   populatePilarSelects();
@@ -828,8 +831,9 @@ async function generarAngulos(){
   if(!tema){ toast('Escribe un tema o elige una tendencia en uso.'); return; }
   const b=document.getElementById('angBtn'); b.disabled=true; b.textContent='Generando...';
   try{
+    const addiTxt = esPilarFinanciacion(pilar) ? `\n\n${ADDI_DOCTRINE}` : '';
     const sys=`Eres estratega de contenido para redes. Generas angulos creativos, especificos y accionables, alineados a la marca y su pilar. Respondes SOLO un array JSON, sin texto extra.`;
-    const user=`Marca: ${BRAND_CONTEXT}\n\nTema de partida: ${tema}.\nPilar objetivo: ${pilar||'el mas afin al tema'}.\n\nGenera 4 angulos distintos entre si. Cada objeto: { "titulo" (corto), "gancho" (frase tipo hook de los primeros 3 segundos, conversacional, espanol colombiano), "formato" (ej: GRWM, voz en off, tutorial, POV, talking head, unboxing), "plataformas" (array con "instagram" y/o "tiktok"), "pilar" (uno de: ${PILARES.join(', ')}), "por_que" (1 frase: que busca lograr, guardados/alcance/confianza) }. Reglas: tono humano no corporativo, nunca nombrar competencia directa, prohibido usar guion largo (em-dash).`;
+    const user=`Marca: ${BRAND_CONTEXT}\n\nTema de partida: ${tema}.\nPilar objetivo: ${pilar||'el mas afin al tema'}.${addiTxt}\n\nGenera 4 angulos distintos entre si. Cada objeto: { "titulo" (corto), "gancho" (frase tipo hook de los primeros 3 segundos, conversacional, espanol colombiano), "formato" (ej: GRWM, voz en off, tutorial, POV, talking head, unboxing), "plataformas" (array con "instagram" y/o "tiktok"), "pilar" (uno de: ${PILARES.join(', ')}), "por_que" (1 frase: que busca lograr, guardados/alcance/confianza) }. Reglas: tono humano no corporativo, nunca nombrar competencia directa, prohibido usar guion largo (em-dash).`;
     const r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:1600,system:sys,messages:[{role:'user',content:user}]}});
     ANGLES=JSON.parse((r.content?.[0]?.text||'').replace(/```json|```/g,'').trim());
     ANGLES.forEach(a=>a._tema=tema);
@@ -860,7 +864,7 @@ async function escribirGuion(i,btn){
   const orig=btn.textContent; btn.disabled=true; btn.textContent='Escribiendo... (20s aprox)';
   try{
     const sys=`Eres director creativo y guionista de video corto para una marca de moda y diseno. Escribes guiones LISTOS PARA PRODUCIR: cada linea del guion va acompanada de su TOMA (que se ve en pantalla), mas una lista de tomas clave a grabar y notas de produccion. Suena a persona real hablando. Respondes SOLO un objeto JSON valido, sin texto extra.`;
-    const user=`Marca: ${BRAND_CONTEXT}\n\nAngulo: ${a.titulo}. Gancho: ${a.gancho}. Formato: ${a.formato}. Pilar: ${a.pilar}. Tema: ${a._tema}.\n\nEscribe un guion DETALLADO y listo para rodaje, para IG Reel y para TikTok. Nivel de detalle alto, como un guion de produccion con direccion de tomas plano por plano.\nDevuelve objeto JSON con esta forma exacta:\n{\n "titulo",\n "hooks_alt": [2 a 3 hooks alternativos mas fuertes, aplicables a ambas plataformas, que cumplan las reglas de hook],\n "ig": {\n   "ficha": { "formato", "duracion" (ej "30-45s"), "objetivo" },\n   "hook",\n   "guion": [ { "toma": "descripcion visual concreta del plano y la accion (ej: Plano detalle de las manos cosiendo sobre el telar)", "texto": "lo que se dice en voz en off o aparece en pantalla en ese plano" } ]  (entre 5 y 8 beats),\n   "cierre",\n   "tomas": [ "lista de 4 a 7 tomas clave a grabar, cada una con tipo de plano" ],\n   "notas": [ "3 a 5 notas de produccion: locacion, props, styling, ritmo, luz, musica" ],\n   "guardar_compartir" (frase corta, natural y bien ubicada para motivar guardar el video y enviarselo a alguien especifico), "caption", "hashtags" (array 5-8 sin #), "cta"\n },\n "tiktok": { "ficha": {"formato","duracion","objetivo"}, "hook", "guion": [ {"toma","texto"} ] (entre 4 y 7 beats, mas rapido y nativo), "cierre", "tomas": [...], "audio" (sugerencia concreta de sonido o tendencia sonora), "notas": [...], "guardar_compartir" (frase corta, natural y bien ubicada para motivar guardar el video y enviarselo a alguien especifico), "caption", "hashtags" (array 5-8 sin #), "cta" }\n}\nReglas: espanol colombiano natural y humano, hook fuerte en los primeros 3s, nunca nombrar competencia directa (usa "la otra marca", "lo que todos compran"), cierre emocional, prohibido usar guion largo (em-dash). Las tomas deben ser concretas y grabables, no genericas. Reglas de hook para el "hook" y los "hooks_alt": ${HOOK_DOCTRINE} El objetivo de engagement son los GUARDADOS y COMPARTIDOS (no los likes): el campo "guardar_compartir" debe ser una frase organica que invite a guardar y a enviar el video a alguien especifico (ej: "guardalo para tu proxima...", "enviaselo a esa amiga que..."), nunca "dale like".`;
+    const user=`Marca: ${BRAND_CONTEXT}\n\nAngulo: ${a.titulo}. Gancho: ${a.gancho}. Formato: ${a.formato}. Pilar: ${a.pilar}. Tema: ${a._tema}.\n\nEscribe un guion DETALLADO y listo para rodaje, para IG Reel y para TikTok. Nivel de detalle alto, como un guion de produccion con direccion de tomas plano por plano.\nDevuelve objeto JSON con esta forma exacta:\n{\n "titulo",\n "hooks_alt": [2 a 3 hooks alternativos mas fuertes, aplicables a ambas plataformas, que cumplan las reglas de hook],\n "ig": {\n   "ficha": { "formato", "duracion" (ej "30-45s"), "objetivo" },\n   "hook",\n   "guion": [ { "toma": "descripcion visual concreta del plano y la accion (ej: Plano detalle de las manos cosiendo sobre el telar)", "texto": "lo que se dice en voz en off o aparece en pantalla en ese plano" } ]  (entre 5 y 8 beats),\n   "cierre",\n   "tomas": [ "lista de 4 a 7 tomas clave a grabar, cada una con tipo de plano" ],\n   "notas": [ "3 a 5 notas de produccion: locacion, props, styling, ritmo, luz, musica" ],\n   "guardar_compartir" (frase corta, natural y bien ubicada para motivar guardar el video y enviarselo a alguien especifico), "caption", "hashtags" (array 5-8 sin #), "cta"\n },\n "tiktok": { "ficha": {"formato","duracion","objetivo"}, "hook", "guion": [ {"toma","texto"} ] (entre 4 y 7 beats, mas rapido y nativo), "cierre", "tomas": [...], "audio" (sugerencia concreta de sonido o tendencia sonora), "notas": [...], "guardar_compartir" (frase corta, natural y bien ubicada para motivar guardar el video y enviarselo a alguien especifico), "caption", "hashtags" (array 5-8 sin #), "cta" }\n}\nReglas: espanol colombiano natural y humano, hook fuerte en los primeros 3s, nunca nombrar competencia directa (usa "la otra marca", "lo que todos compran"), cierre emocional, prohibido usar guion largo (em-dash). Las tomas deben ser concretas y grabables, no genericas. Reglas de hook para el "hook" y los "hooks_alt": ${HOOK_DOCTRINE} El objetivo de engagement son los GUARDADOS y COMPARTIDOS (no los likes): el campo "guardar_compartir" debe ser una frase organica que invite a guardar y a enviar el video a alguien especifico (ej: "guardalo para tu proxima...", "enviaselo a esa amiga que..."), nunca "dale like".${esPilarFinanciacion(a.pilar)?`\n\n${ADDI_DOCTRINE}`:''}`;
     const s=await claudeJSON(sys,user,8000);
     s.angulo=a.titulo; s.pilar=a.pilar; s.tema=a._tema;
     s.plataformas=(a.plataformas&&a.plataformas.length)?a.plataformas:['instagram','tiktok'];
@@ -1311,7 +1315,7 @@ async function quitarWatchlist(id){
 const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const DOW=['Lun','Mar','Mie','Jue','Vie','Sab','Dom'];
 const PIL_COLORS=['#1E3A8A','#B5613B','#3C5148','#8a5a12','#2C5282','#7A4B8A','#1B8A4B','#9A6A1A'];
-function pilColor(pilar){ const i=PILARES.indexOf(pilar); return PIL_COLORS[(i<0?0:i)%PIL_COLORS.length]; }
+function pilColor(pilar){ if(esPilarFinanciacion(pilar)) return '#0A2A66'; const i=PILARES.indexOf(pilar); return PIL_COLORS[(i<0?0:i)%PIL_COLORS.length]; }
 function ymd(y,m,d){ return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'); }
 
 async function loadCalendar(){
@@ -1533,9 +1537,10 @@ async function generarPlan(){
       if(r) insTxt=` Prioriza los pilares que mas generan guardados y compartidos segun datos reales: ${r}.`;
     }
     const dias=new Date(calYear,calMonth+1,0).getDate();
+    const addiTxt = PILARES.some(esPilarFinanciacion) ? `\nNota sobre el pilar de financiacion: ${ADDI_DOCTRINE}` : '';
     const plan=await claudeJSON(
       `Eres planner de contenido. Distribuyes el mes de forma equilibrada entre formatos y pilares, respetando la cadencia. Respondes SOLO un objeto JSON.`,
-      `Marca: ${BRAND_CONTEXT}\nPilares: ${PILARES.join(', ')}.\nMes objetivo: ${MESES[calMonth]} ${calYear} (${dias} dias).\nCadencia: ~${cad} posts por semana. Mezcla de formatos: ~${reels}% Reels, el resto Carruseles.${insTxt}\n\nGenera un plan mensual: reparte las piezas en fechas concretas dentro del mes, bien distribuidas (no todas el mismo dia), equilibrando los pilares (que ninguno quede sin contenido) y respetando la mezcla de formatos. Devuelve JSON: { "resumen": "una linea con la logica del plan", "plan": [ { "fecha": "YYYY-MM-DD dentro del mes", "formato": "Reel"|"Carrusel"|"Historia", "pilar": "uno de los pilares", "idea": "idea corta y accionable en espanol colombiano" } ] }. Prohibido em-dash.`,
+      `Marca: ${BRAND_CONTEXT}\nPilares: ${PILARES.join(', ')}.${addiTxt}\nMes objetivo: ${MESES[calMonth]} ${calYear} (${dias} dias).\nCadencia: ~${cad} posts por semana. Mezcla de formatos: ~${reels}% Reels, el resto Carruseles.${insTxt}\n\nGenera un plan mensual: reparte las piezas en fechas concretas dentro del mes, bien distribuidas (no todas el mismo dia), equilibrando los pilares (que ninguno quede sin contenido) y respetando la mezcla de formatos. Devuelve JSON: { "resumen": "una linea con la logica del plan", "plan": [ { "fecha": "YYYY-MM-DD dentro del mes", "formato": "Reel"|"Carrusel"|"Historia", "pilar": "uno de los pilares", "idea": "idea corta y accionable en espanol colombiano" } ] }. Prohibido em-dash.`,
       3000);
     PLAN=(plan.plan||[]).filter(x=>x&&x.fecha);
     renderPlanPreview(plan.resumen||'');
