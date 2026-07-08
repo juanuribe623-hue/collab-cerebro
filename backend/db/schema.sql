@@ -110,6 +110,21 @@ CREATE TABLE IF NOT EXISTS content_insights (
 CREATE INDEX IF NOT EXISTS idx_content_insights_company ON content_insights (company_id);
 
 -- ───────────────────────────────────────────────────────────────────────────
+-- SEGURIDAD: activar Row-Level Security en TODAS las tablas.
+-- El backend usa service_role (ignora RLS) y el frontend solo usa Auth, asi que
+-- esto no rompe nada y cierra la API publica (anon key) contra acceso directo.
+ALTER TABLE companies            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE company_members      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE content_trends       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE content_scripts      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE company_brief        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE content_influencers  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE watchlist_creators   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agency_creators      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE content_calendar     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE content_insights     ENABLE ROW LEVEL SECURITY;
+
+-- ───────────────────────────────────────────────────────────────────────────
 -- SEMBRAR EL PRIMER CLIENTE (Casa Precis)
 -- 1) Crear la empresa:
 --    INSERT INTO companies (name) VALUES ('Casa Precis') RETURNING id;
