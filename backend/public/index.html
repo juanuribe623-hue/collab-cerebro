@@ -229,6 +229,7 @@
       <a data-view="prod" onclick="go('prod')">Produccion</a>
       <a data-view="brief" onclick="go('brief')">Brief de marca</a>
       <a data-view="visual" onclick="go('visual')">Identidad visual</a>
+      <a data-view="i2v" onclick="go('i2v')">Animar imagen (IA)</a>
       <a data-view="brandfit" onclick="go('brandfit')">Influencers / BrandFit</a>
       <a data-view="radar" onclick="go('radar')">Radar emergentes</a>
       <a data-view="watchlist" onclick="go('watchlist')">Watchlist</a>
@@ -330,6 +331,37 @@
         <button class="btn btn-primary" onclick="generarGuiaVisual()" id="vBtn">Generar guia</button>
       </div>
       <div id="visualGuide"></div>
+    </section>
+
+    <!-- ANIMAR IMAGEN (image-to-video) -->
+    <section id="view-i2v" class="hidden">
+      <div class="head">
+        <div>
+          <h2>Animar imagen</h2>
+          <div class="sub">Sube una foto de producto, cuenta que quieres que pase, y el cerebro te entrega el prompt listo y las instrucciones para Higgsfield o Google Labs.</div>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="stage-t">1 · La foto</div>
+        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+          <label for="i2vFile" id="i2vDrop" style="display:flex;align-items:center;justify-content:center;width:220px;height:120px;border:2px dashed var(--line);border-radius:10px;cursor:pointer;color:var(--gray);font-size:13px;text-align:center;padding:10px">Haz clic para subir la foto<br>(JPG o PNG)</label>
+          <input type="file" id="i2vFile" accept="image/*" style="display:none" onchange="i2vPick(this)">
+          <img id="i2vPreview" alt="" style="display:none;max-width:200px;max-height:260px;border-radius:10px;border:1px solid var(--line)">
+        </div>
+        <div class="hint" style="margin-top:8px">Ideal: la foto final que van a animar (modelo con la prenda, o el producto en su escena). La misma foto se sube despues a la herramienta como fotograma inicial.</div>
+      </div>
+      <div class="stage">
+        <div class="stage-t">2 · Que quieres que pase</div>
+        <textarea id="i2vSit" rows="2" placeholder="Ej: que la modelo gire suave y el vestido fluya con la brisa / que la camara se acerque lento a la cartera" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit"></textarea>
+        <div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap">
+          <select id="i2vPlat" style="padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">
+            <option value="higgsfield">Higgsfield (Kling) · recomendado</option>
+            <option value="google">Google Labs (Flow / Veo)</option>
+          </select>
+          <button class="btn btn-primary" id="i2vBtn" onclick="generarPromptI2V()">Generar prompt</button>
+        </div>
+      </div>
+      <div id="i2vResult"></div>
     </section>
 
     <!-- INFLUENCERS / BRANDFIT -->
@@ -1772,6 +1804,111 @@ async function optimizarHook(){
 }
 
 // ───────── util ─────────
+// ───────── Animar imagen (image-to-video) ─────────
+let I2V_IMG=null;   // { media_type, data } de la foto subida, reescalada
+function i2vPick(inp){
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=1024, sc=Math.min(1,MAX/Math.max(img.width,img.height));
+      const cv=document.createElement('canvas'); cv.width=Math.round(img.width*sc); cv.height=Math.round(img.height*sc);
+      cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+      const durl=cv.toDataURL('image/jpeg',0.85);
+      I2V_IMG={media_type:'image/jpeg',data:durl.split(',')[1]};
+      const pv=document.getElementById('i2vPreview'); pv.src=durl; pv.style.display='block';
+      document.getElementById('i2vDrop').innerHTML='Cambiar foto';
+    };
+    img.src=e.target.result;
+  };
+  rd.readAsDataURL(f);
+}
+// Como claudeJSON pero con imagen adjunta (vision)
+async function claudeVisionJSON(sys,user,img,max){
+  sys=stripSurrogates(sys); user=stripSurrogates(user);
+  let last;
+  for(let attempt=0;attempt<2;attempt++){
+    try{
+      const r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:max||1400,system:sys,
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:img.media_type,data:img.data}},
+          {type:'text',text:user}
+        ]}]}});
+      let txt=(r.content?.[0]?.text||'').replace(/```json|```/g,'').trim();
+      try{ return JSON.parse(txt); }
+      catch(_){
+        const s=txt.search(/[[{]/), e=Math.max(txt.lastIndexOf(']'),txt.lastIndexOf('}'));
+        if(s>=0 && e>s) return JSON.parse(txt.slice(s,e+1));
+        throw new Error('Respuesta no-JSON de la IA');
+      }
+    }catch(err){ last=err; }
+  }
+  throw last;
+}
+function i2vSteps(plat){
+  if(plat==='google') return {nombre:'Google Labs (Flow / Veo)',pasos:[
+    'Entra a labs.google/flow e inicia sesion con la cuenta de Google.',
+    'Crea un proyecto nuevo y elige el modo de imagen a video (Frames to Video).',
+    'Sube ESTA MISMA foto como fotograma inicial (first frame).',
+    'Pega el Prompt (en ingles) en el campo de texto.',
+    'Flow no tiene campo aparte para el negativo: agrega al final del prompt la frase "Avoid:" seguida de la lista negativa.',
+    'Genera (unos 8 segundos de video). Revisa cara y estampado.',
+    'Si la pieza se deforma, simplifica el movimiento a UN solo gesto y vuelve a generar.']};
+  return {nombre:'Higgsfield (Kling)',pasos:[
+    'Entra a higgsfield.ai e inicia sesion.',
+    'Abre Cinema Studio y elige el modo Video (image to video).',
+    'Modelo: Kling 3.0 Turbo.',
+    'En START FRAME sube ESTA MISMA foto (el video hereda el formato de la foto).',
+    'Pega el Prompt en el campo de texto y el Negativo en el campo negative prompt.',
+    'Ajustes: duracion 5s, 1080p, movimiento bajo o medio.',
+    'Genera. Si la cara o el estampado se deforman, baja el movimiento y vuelve a generar.']};
+}
+async function generarPromptI2V(){
+  if(!I2V_IMG){ toast('Sube primero la foto.'); return; }
+  const sit=document.getElementById('i2vSit').value.trim();
+  if(!sit){ toast('Cuenta que quieres que pase en el video.'); return; }
+  const plat=document.getElementById('i2vPlat').value;
+  const b=document.getElementById('i2vBtn'); b.disabled=true; b.textContent='Generando... (15s aprox)';
+  try{
+    const sys=`Eres director de fotografia y experto en prompts de image-to-video (Kling, Veo) para marcas de moda y diseno de alto nivel. Escribes prompts en INGLES que animan una foto cuidando la identidad: cara estable si hay persona, y prenda o producto sin deformarse. Respondes SOLO un objeto JSON valido.`;
+    const user=`Mira la foto adjunta (pieza de ${BRIEF.nombre||'la marca'}). El equipo quiere este video: "${sit}".\n\nDoctrina validada en pruebas reales (funciona muy bien, siguela): (1) UN solo beat de movimiento, lento o medio, nada brusco; (2) la camara se describe en el texto (ej: slow elegant camera push-in), no como preset; (3) luz calida suave y grade editorial premium; (4) describe la prenda o producto EXACTAMENTE como se ve en la foto (tipo de pieza, color, estampado, largo, material aparente) para que el modelo no lo cambie; (5) cierra SIEMPRE con la clausula de identidad: "Identity-stable face" si hay persona, y "[descripcion corta de la pieza] pattern and silhouette unchanged". Prompt de 40 a 70 palabras.\n\nDevuelve JSON: { "nombre_pieza": "que es la pieza, en espanol (ej: vestido maxi floral rojo de vuelos)", "prompt_en": "el prompt en ingles", "negative_en": "lista negativa en ingles separada por comas (incluye siempre: distorted face, extra fingers, warped hands, morphing fabric, flicker, text, watermark; suma lo especifico de esta foto)", "consejos": ["2 a 4 consejos en espanol colombiano especificos para ESTA foto (ej: el estampado es complejo, si se derrite baja el movimiento)"] }. Prohibido usar guion largo (em-dash).`;
+    const r=await claudeVisionJSON(sys,user,I2V_IMG,1400);
+    renderI2V(r,plat);
+  }catch(e){ toast('Error generando el prompt: '+e.message); }
+  b.disabled=false; b.textContent='Generar prompt';
+}
+function renderI2V(r,plat){
+  const st=i2vSteps(plat);
+  document.getElementById('i2vResult').innerHTML=`
+  <div class="stage">
+    <div class="stage-t">3 · Tu paquete para animar: ${esc(r.nombre_pieza||'')}</div>
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <b style="font-size:13px">Prompt (pegalo tal cual, en ingles)</b>
+        <button class="btn btn-ghost" onclick="i2vCopy('i2vPrompt')">Copiar</button>
+      </div>
+      <div id="i2vPrompt" style="margin-top:8px;font-size:13px;line-height:1.55;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px">${esc(r.prompt_en||'')}</div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <b style="font-size:13px">Negativo (lo que NO debe pasar)</b>
+        <button class="btn btn-ghost" onclick="i2vCopy('i2vNeg')">Copiar</button>
+      </div>
+      <div id="i2vNeg" style="margin-top:8px;font-size:13px;line-height:1.55;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px">${esc(r.negative_en||'')}</div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <b style="font-size:13px">Paso a paso en ${esc(st.nombre)}</b>
+      <ol style="margin:8px 0 0 18px;font-size:13px;line-height:1.7">${st.pasos.map(p=>`<li>${esc(p)}</li>`).join('')}</ol>
+    </div>
+    ${(r.consejos&&r.consejos.length)?`<div class="card"><b style="font-size:13px">Consejos para esta foto</b><ul style="margin:8px 0 0 18px;font-size:13px;line-height:1.7">${r.consejos.map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div>`:''}
+  </div>`;
+}
+function i2vCopy(id){
+  const t=document.getElementById(id).textContent;
+  navigator.clipboard.writeText(t).then(()=>toast('Copiado al portapapeles.')).catch(()=>toast('No se pudo copiar, seleccionalo a mano.'));
+}
+
 function go(view){
   document.querySelectorAll('#sidebar nav a').forEach(a=>a.classList.toggle('active', a.dataset.view===view));
   document.querySelectorAll('#main > section').forEach(s=>s.classList.toggle('hidden', s.id!=='view-'+view));
