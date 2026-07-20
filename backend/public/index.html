@@ -230,6 +230,7 @@
       <a data-view="brief" onclick="go('brief')">Brief de marca</a>
       <a data-view="visual" onclick="go('visual')">Identidad visual</a>
       <a data-view="i2v" onclick="go('i2v')">Animar imagen (IA)</a>
+      <a data-view="tryon" onclick="go('tryon')">Probador virtual (IA)</a>
       <a data-view="brandfit" onclick="go('brandfit')">Influencers / BrandFit</a>
       <a data-view="radar" onclick="go('radar')">Radar emergentes</a>
       <a data-view="watchlist" onclick="go('watchlist')">Watchlist</a>
@@ -362,6 +363,47 @@
         </div>
       </div>
       <div id="i2vResult"></div>
+    </section>
+
+    <!-- PROBADOR VIRTUAL (try-on) -->
+    <section id="view-tryon" class="hidden">
+      <div class="head">
+        <div>
+          <h2>Probador virtual</h2>
+          <div class="sub">Sube la foto de una persona y la foto de una prenda, y la IA la viste con la pieza. Piloto interno: muestra como se VE, no simula la talla.</div>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="stage-t">1 · Las dos fotos</div>
+        <div style="display:flex;gap:22px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:6px">La persona</div>
+            <label for="toPersona" id="toPersonaDrop" style="display:flex;align-items:center;justify-content:center;width:190px;height:110px;border:2px dashed var(--line);border-radius:10px;cursor:pointer;color:var(--gray);font-size:12.5px;text-align:center;padding:8px">Foto de cuerpo entero o 3/4, de frente</label>
+            <input type="file" id="toPersona" accept="image/*" style="display:none" onchange="tryonPick(this,'persona')">
+            <img id="toPersonaPrev" alt="" style="display:none;max-width:190px;max-height:230px;border-radius:10px;border:1px solid var(--line);margin-top:8px">
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:6px">La prenda</div>
+            <label for="toPrenda" id="toPrendaDrop" style="display:flex;align-items:center;justify-content:center;width:190px;height:110px;border:2px dashed var(--line);border-radius:10px;cursor:pointer;color:var(--gray);font-size:12.5px;text-align:center;padding:8px">Foto de la pieza sola o puesta en otra modelo</label>
+            <input type="file" id="toPrenda" accept="image/*" style="display:none" onchange="tryonPick(this,'prenda')">
+            <img id="toPrendaPrev" alt="" style="display:none;max-width:190px;max-height:230px;border-radius:10px;border:1px solid var(--line);margin-top:8px">
+          </div>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="stage-t">2 · Generar</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <select id="toCat" style="padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">
+            <option value="auto">Deteccion automatica</option>
+            <option value="tops">Prenda superior (blusa, top, chaqueta)</option>
+            <option value="bottoms">Prenda inferior (pantalon, falda)</option>
+            <option value="one-pieces">Vestido o enterizo</option>
+          </select>
+          <button class="btn btn-primary" id="toBtn" onclick="generarTryon()">Vestir a la persona</button>
+        </div>
+        <div class="hint" style="margin-top:8px">Ojo: los estampados y texturas muy complejas pueden distorsionarse; si pasa, prueba con una foto de la prenda mas plana y bien iluminada. Solo fotos de personas que dieron su permiso.</div>
+      </div>
+      <div id="tryonResult"></div>
     </section>
 
     <!-- INFLUENCERS / BRANDFIT -->
@@ -1907,6 +1949,55 @@ function renderI2V(r,plat){
 function i2vCopy(id){
   const t=document.getElementById(id).textContent;
   navigator.clipboard.writeText(t).then(()=>toast('Copiado al portapapeles.')).catch(()=>toast('No se pudo copiar, seleccionalo a mano.'));
+}
+
+// ───────── Probador virtual (try-on) ─────────
+const TRYON={persona:null,prenda:null};   // data URIs (jpeg reescalado)
+function tryonPick(inp,which){
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=1280, sc=Math.min(1,MAX/Math.max(img.width,img.height));
+      const cv=document.createElement('canvas'); cv.width=Math.round(img.width*sc); cv.height=Math.round(img.height*sc);
+      cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+      const durl=cv.toDataURL('image/jpeg',0.9);
+      TRYON[which]=durl;
+      const pv=document.getElementById(which==='persona'?'toPersonaPrev':'toPrendaPrev'); pv.src=durl; pv.style.display='block';
+      document.getElementById(which==='persona'?'toPersonaDrop':'toPrendaDrop').innerHTML='Cambiar foto';
+    };
+    img.src=e.target.result;
+  };
+  rd.readAsDataURL(f);
+}
+async function generarTryon(){
+  if(!TRYON.persona||!TRYON.prenda){ toast('Sube las dos fotos: la persona y la prenda.'); return; }
+  const b=document.getElementById('toBtn'); b.disabled=true; b.textContent='Vistiendo... (20-40s)';
+  document.getElementById('tryonResult').innerHTML='<div class="empty">Generando, esto tarda entre 20 y 40 segundos...</div>';
+  try{
+    const r=await api('/api/tryon',{method:'POST',body:{
+      model_image:TRYON.persona, garment_image:TRYON.prenda,
+      category:document.getElementById('toCat').value
+    }});
+    const url=(r.output&&r.output[0])||'';
+    if(!url) throw new Error('No llego imagen de salida.');
+    document.getElementById('tryonResult').innerHTML=`
+    <div class="stage">
+      <div class="stage-t">3 · Resultado</div>
+      <div style="display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">
+        <img src="${esc(url)}" alt="Resultado del probador" style="max-width:420px;width:100%;border-radius:12px;border:1px solid var(--line)">
+        <div style="max-width:320px">
+          <a class="btn btn-primary" href="${esc(url)}" target="_blank" rel="noopener" style="text-decoration:none;display:inline-block;margin-bottom:10px">Abrir grande / descargar</a>
+          <div class="hint">Revisa cara, manos y estampado. Si algo se ve raro: vuelve a generar (cada corrida sale distinta), prueba otra foto de la prenda, o elige la categoria exacta en vez de la deteccion automatica.</div>
+        </div>
+      </div>
+    </div>`;
+  }catch(e){
+    document.getElementById('tryonResult').innerHTML='<div class="empty">Error: '+esc(e.message)+'</div>';
+    toast('Error en el probador: '+e.message);
+  }
+  b.disabled=false; b.textContent='Vestir a la persona';
 }
 
 function go(view){
