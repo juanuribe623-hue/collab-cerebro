@@ -1920,8 +1920,10 @@ async function generarPromptI2V(){
   }catch(e){ toast('Error generando el prompt: '+e.message); }
   b.disabled=false; b.textContent='Generar prompt';
 }
+let I2V_LAST=null;   // ultimo prompt generado (para el boton de generar video directo)
 function renderI2V(r,plat){
   const st=i2vSteps(plat);
+  I2V_LAST={prompt_en:r.prompt_en||'',negative_en:r.negative_en||''};
   document.getElementById('i2vResult').innerHTML=`
   <div class="stage">
     <div class="stage-t">3 · Tu paquete para animar: ${esc(r.nombre_pieza||'')}</div>
@@ -1939,12 +1941,52 @@ function renderI2V(r,plat){
       </div>
       <div id="i2vNeg" style="margin-top:8px;font-size:13px;line-height:1.55;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px">${esc(r.negative_en||'')}</div>
     </div>
+    <div class="card" style="margin-bottom:12px;border-color:var(--sky)">
+      <b style="font-size:13px">Generar el video aqui (API de Higgsfield)</b>
+      <div class="hint" style="margin:6px 0 10px">Usa esta misma foto y este prompt, sin salir del cerebro. Tarda entre 1 y 3 minutos.</div>
+      <button class="btn btn-primary" id="i2vGoBtn" onclick="generarVideoI2V()">Generar video</button>
+      <div id="i2vVideo"></div>
+    </div>
     <div class="card" style="margin-bottom:12px">
-      <b style="font-size:13px">Paso a paso en ${esc(st.nombre)}</b>
+      <b style="font-size:13px">O hazlo a mano: paso a paso en ${esc(st.nombre)}</b>
       <ol style="margin:8px 0 0 18px;font-size:13px;line-height:1.7">${st.pasos.map(p=>`<li>${esc(p)}</li>`).join('')}</ol>
     </div>
     ${(r.consejos&&r.consejos.length)?`<div class="card"><b style="font-size:13px">Consejos para esta foto</b><ul style="margin:8px 0 0 18px;font-size:13px;line-height:1.7">${r.consejos.map(c=>`<li>${esc(c)}</li>`).join('')}</ul></div>`:''}
   </div>`;
+}
+async function generarVideoI2V(){
+  if(!I2V_IMG||!I2V_LAST){ toast('Primero genera el prompt con la foto.'); return; }
+  const b=document.getElementById('i2vGoBtn'); b.disabled=true; b.textContent='Enviando...';
+  const box=document.getElementById('i2vVideo');
+  const wait=ms=>new Promise(r=>setTimeout(r,ms));
+  try{
+    const prompt=I2V_LAST.prompt_en+(I2V_LAST.negative_en?(' Avoid: '+I2V_LAST.negative_en+'.'):'');
+    const start=await api('/api/i2v',{method:'POST',body:{image:'data:image/jpeg;base64,'+I2V_IMG.data,prompt,duration:5}});
+    const id=start.request_id;
+    box.innerHTML='<div class="hint" id="i2vProg" style="margin-top:10px">En cola...</div>';
+    for(let i=0;i<60;i++){
+      await wait(5000);
+      const st=await api('/api/i2v/status/'+encodeURIComponent(id));
+      const s=st.status;
+      const prog=document.getElementById('i2vProg');
+      if(s==='completed'){
+        const url=st.video&&st.video.url;
+        if(!url) throw new Error('Termino pero no llego la URL del video.');
+        box.innerHTML=`
+          <video controls playsinline style="max-width:420px;width:100%;border-radius:12px;border:1px solid var(--line);margin-top:10px" src="${esc(url)}"></video>
+          <div style="margin-top:8px"><a class="btn btn-ghost" href="${esc(url)}" target="_blank" rel="noopener" style="text-decoration:none">Abrir / descargar MP4</a></div>
+          <div class="hint" style="margin-top:6px">Revisa cara, manos y estampado. Cada corrida sale distinta: si algo se ve raro, genera de nuevo.</div>`;
+        b.disabled=false; b.textContent='Generar otra version'; return;
+      }
+      if(s==='failed') throw new Error('La generacion fallo en Higgsfield. Intenta de nuevo.');
+      if(s==='nsfw') throw new Error('El modelo marco el contenido como no permitido. Prueba con otra foto.');
+      if(prog) prog.textContent=(s==='queued'?'En cola':'Generando')+'... ('+((i+1)*5)+'s)';
+    }
+    throw new Error('Tardo demasiado (mas de 5 minutos). Revisa creditos en Higgsfield e intenta de nuevo.');
+  }catch(e){
+    box.innerHTML='<div class="hint" style="margin-top:10px;color:#B00020">Error: '+esc(e.message)+'</div>';
+    b.disabled=false; b.textContent='Generar video';
+  }
 }
 function i2vCopy(id){
   const t=document.getElementById(id).textContent;

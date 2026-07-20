@@ -42,6 +42,7 @@ app.use('/api/agency-creators', require('./routes/agency'));
 app.use('/api/calendar',        require('./routes/calendar'));
 app.use('/api/insights',        require('./routes/insights'));
 app.use('/api/tryon',           require('./routes/tryon'));
+app.use('/api/i2v',             require('./routes/i2v'));
 app.use('/',            require('./routes/proxy'));   // /claude y /apify
 
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
