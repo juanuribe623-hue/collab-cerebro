@@ -231,6 +231,7 @@
       <a data-view="visual" onclick="go('visual')">Identidad visual</a>
       <a data-view="i2v" onclick="go('i2v')">Animar imagen (IA)</a>
       <a data-view="tryon" onclick="go('tryon')">Probador virtual (IA)</a>
+      <a data-view="vcheck" onclick="go('vcheck')">Revisa un video</a>
       <a data-view="brandfit" onclick="go('brandfit')">Influencers / BrandFit</a>
       <a data-view="radar" onclick="go('radar')">Radar emergentes</a>
       <a data-view="watchlist" onclick="go('watchlist')">Watchlist</a>
@@ -404,6 +405,39 @@
         <div class="hint" style="margin-top:8px">Ojo: los estampados y texturas muy complejas pueden distorsionarse; si pasa, prueba con una foto de la prenda mas plana y bien iluminada. Solo fotos de personas que dieron su permiso.</div>
       </div>
       <div id="tryonResult"></div>
+    </section>
+
+    <!-- REVISA UN VIDEO (pre-flight de contenido) -->
+    <section id="view-vcheck" class="hidden">
+      <div class="head">
+        <div>
+          <h2>Revisa un video</h2>
+          <div class="sub">Sube el video ANTES de publicarlo y el cerebro lo mira con la vara de la marca: hook, texto, ritmo y cierre, y que cambiar para que la gente lo guarde y lo comparta. El video se lee aqui en tu equipo: solo unas imagenes viajan al motor, nunca el archivo.</div>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="stage-t">1 · El video</div>
+        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+          <label for="vcFile" id="vcDrop" style="display:flex;align-items:center;justify-content:center;width:240px;height:110px;border:2px dashed var(--line);border-radius:10px;cursor:pointer;color:var(--gray);font-size:12.5px;text-align:center;padding:8px">Haz clic para elegir el video<br>(MP4 o MOV, vertical, hasta ~1 minuto)</label>
+          <input type="file" id="vcFile" accept="video/*" style="display:none" onchange="vcPick(this)">
+          <div id="vcInfo" class="hint" style="max-width:280px"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
+          <select id="vcPlat" style="padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">
+            <option value="instagram">Instagram (Reel)</option>
+            <option value="tiktok">TikTok</option>
+          </select>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="stage-t">2 · Lo que dices en el video (opcional, pero da el analisis fino)</div>
+        <textarea id="vcTexto" rows="3" placeholder="Pega aqui el guion o lo que hablas en el video, palabra por palabra. Sin esto, el cerebro evalua solo lo visual y el texto en pantalla." style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit"></textarea>
+        <input id="vcCtx" placeholder="Objetivo o contexto de la pieza (opcional). Ej: empujar la coleccion de viaje" style="width:100%;margin-top:8px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
+        <div style="margin-top:10px">
+          <button class="btn btn-primary" id="vcBtn" onclick="revisarVideo()">Analizar el video</button>
+        </div>
+      </div>
+      <div id="vcResult"></div>
     </section>
 
     <!-- INFLUENCERS / BRANDFIT -->
@@ -2040,6 +2074,91 @@ async function generarTryon(){
     toast('Error en el probador: '+e.message);
   }
   b.disabled=false; b.textContent='Vestir a la persona';
+}
+
+// ───────── Revisa un video (pre-flight de contenido) ─────────
+let VC_FILE=null;
+function vcPick(inp){
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  VC_FILE=f;
+  document.getElementById('vcDrop').innerHTML='Cambiar video';
+  document.getElementById('vcInfo').textContent=f.name+' ('+(f.size/1048576).toFixed(1)+' MB)';
+}
+// Extrae 10 frames repartidos del video, como JPEG base64 (nunca sube el archivo)
+async function vcFrames(file){
+  const url=URL.createObjectURL(file);
+  const v=document.createElement('video');
+  v.preload='auto'; v.muted=true; v.playsInline=true; v.src=url;
+  await new Promise((res,rej)=>{ v.onloadedmetadata=()=>res(); v.onerror=()=>rej(new Error('No se pudo leer el video en este navegador.')); });
+  const dur=(v.duration&&isFinite(v.duration))?v.duration:0;
+  const cv=document.createElement('canvas'), ctx=cv.getContext('2d');
+  const N=10, MAX=640, frames=[];
+  for(let i=0;i<N;i++){
+    const t=dur>0?(dur*(i+0.5))/N:0;
+    await new Promise((res,rej)=>{ v.onseeked=()=>res(); v.onerror=()=>rej(new Error('No se pudo leer el video.')); v.currentTime=Math.min(t,Math.max(0,dur-0.05)); });
+    const w=v.videoWidth||720,h=v.videoHeight||1280,sc=Math.min(1,MAX/Math.max(w,h));
+    cv.width=Math.round(w*sc); cv.height=Math.round(h*sc);
+    ctx.drawImage(v,0,0,cv.width,cv.height);
+    frames.push(cv.toDataURL('image/jpeg',0.6).split(',')[1]);
+  }
+  URL.revokeObjectURL(url);
+  return {frames,dur};
+}
+async function revisarVideo(){
+  if(!VC_FILE){ toast('Elige primero el video.'); return; }
+  const b=document.getElementById('vcBtn'); b.disabled=true; b.textContent='Leyendo el video...';
+  try{
+    const {frames,dur}=await vcFrames(VC_FILE);
+    b.textContent='Analizando... (30s aprox)';
+    const plat=document.getElementById('vcPlat').value;
+    const texto=document.getElementById('vcTexto').value.trim().slice(0,2500);
+    const ctx=document.getElementById('vcCtx').value.trim().slice(0,300);
+    const sys=`Eres un estratega de contenido senior de Collab, agencia colombiana de influencer marketing. Pules videos ANTES de publicarse: no describes lo obvio, entras al detalle fino. Te llegan FRAMES en orden cronologico de un video sin publicar de la marca, y a veces el TEXTO de lo que se dice. La vara de la casa: potencial de GUARDADOS, COMPARTIDOS y COMENTARIOS, nunca de likes. Como entras al detalle: (1) el HOOK palabra por palabra: si falla, REESCRIBELO textual listo para leer a camara; (2) las palabras frase por frase: donde se cae la atencion, si hay relleno, si llega la recompensa; (3) el TEXTO EN PANTALLA leelo literal de los frames: si refuerza o repite, si se alcanza a leer, si falta subtitulo; (4) el CTA: UN solo llamado principal en el cierre; una frase de guardar/compartir en el cuerpo y una pregunta corta despues del CTA son complementos validos, NO doble CTA; castiga solo dos acciones compitiendo en el cierre; si hay objetivo declarado evalua el CTA contra ESE objetivo; (5) lo visual importa pero es el envase: el mayor potencial casi siempre esta en las palabras. Ademas ayudas con la PRODUCCION como director de contenido pero en lenguaje simple: cero jerga (di "de frente, de la cintura para arriba", no "plano medio"), sin nombres de programas, todo grabable con un celular. Reglas duras: espanol colombiano; cero em-dash; jamas menciones IA ni "el algoritmo"; CERO consejo generico (todo citando la frase o el frame de ESTE video); nada de prometer resultados; si no hay guion y no se lee texto en los frames, dilo claro y evalua lo visual sin inventar el audio. Respondes SOLO un objeto JSON valido.`;
+    const user=`Marca: ${BRAND_CONTEXT}\n\nContexto de la pieza: ${JSON.stringify({plataforma:plat,duracion_segundos:Math.round(dur)||'no disponible',texto_de_lo_que_dice:texto||'no lo dieron (evalua lo visual y el texto en pantalla; no inventes el audio)',objetivo:ctx||'no lo dieron (default de la casa: guardados y compartidos)',nota:'Te paso '+frames.length+' frames en orden, del inicio al final.'})}\n\nAnaliza a fondo este video sin publicar. Devuelve JSON con esta forma exacta:\n{\n "potencial": entero 0-100 (potencial de guardados/compartidos/comentarios),\n "veredicto": "1-2 frases directas, honestas, sin prometer viralidad",\n "listo_para_publicar": true o false,\n "sobre_el_texto": ["analisis fino de las palabras citando frases textuales; [] si no hay texto"],\n "voz_de_marca": ["1-3 puntos: si suena o no a la voz de la marca y por que"],\n "fortalezas": ["2-4 puntos concretos de lo que YA funciona, citando lo que se ve o dice"],\n "cambios": [{"aspecto":"hook/texto en pantalla/ritmo/cierre...","problema":"que frena, citando lo concreto","arreglo":"cambio concreto y grabable; si es de palabras, la REESCRITURA lista"}],\n "produccion": {"tomas":["2-4 tomas concretas en lenguaje simple"],"edicion":["2-4 tips de corte/ritmo/musica/brillo en simple"],"texto_en_pantalla":["2-3 textos: que escribir, donde y cuando"]}\n}`;
+    const content=frames.map(d=>({type:'image',source:{type:'base64',media_type:'image/jpeg',data:d}}));
+    content.push({type:'text',text:stripSurrogates(user)});
+    let r,parsed,lastErr;
+    for(let a=0;a<2;a++){
+      try{
+        r=await api('/claude',{method:'POST',body:{model:'claude-sonnet-4-6',max_tokens:8000,system:stripSurrogates(sys),messages:[{role:'user',content}]}});
+        let txt=(r.content?.[0]?.text||'').replace(/```json|```/g,'').trim();
+        try{ parsed=JSON.parse(txt); }
+        catch(_){ const s=txt.search(/[[{]/),e=Math.max(txt.lastIndexOf(']'),txt.lastIndexOf('}')); if(s>=0&&e>s) parsed=JSON.parse(txt.slice(s,e+1)); else throw new Error('Respuesta no-JSON'); }
+        break;
+      }catch(err){ lastErr=err; }
+    }
+    if(!parsed) throw lastErr||new Error('Sin respuesta');
+    renderVCheck(parsed);
+  }catch(e){ toast('Error revisando el video: '+e.message); }
+  b.disabled=false; b.textContent='Analizar el video';
+}
+function renderVCheck(r){
+  const sc=Math.max(0,Math.min(100,+r.potencial||0));
+  const color=sc>=70?'#1B8A4B':(sc>=45?'#8a5a12':'#B00020');
+  const li=(arr)=>(arr||[]).map(x=>`<li>${esc(x)}</li>`).join('');
+  document.getElementById('vcResult').innerHTML=`
+  <div class="stage">
+    <div class="stage-t">3 · El diagnostico</div>
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+        <div style="width:92px;height:92px;border-radius:50%;border:6px solid ${color};display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;color:${color}">${sc}</div>
+        <div style="flex:1;min-width:220px">
+          <div style="font-size:12px;color:var(--gray);text-transform:uppercase;letter-spacing:.5px">Potencial (guardados y compartidos)</div>
+          <div style="font-size:14px;margin-top:6px;line-height:1.5">${esc(r.veredicto||'')}</div>
+          <span class="badge" style="margin-top:8px;display:inline-block;background:${r.listo_para_publicar?'#E6F4EA':'#FDEBEC'};color:${r.listo_para_publicar?'#1B8A4B':'#B00020'}">${r.listo_para_publicar?'Listo para publicar':'Ajustalo antes de publicar'}</span>
+        </div>
+      </div>
+    </div>
+    ${(r.sobre_el_texto&&r.sobre_el_texto.length)?`<div class="card" style="margin-bottom:12px"><b style="font-size:13px">Sobre las palabras</b><ul style="margin:8px 0 0 18px;font-size:13px;line-height:1.7">${li(r.sobre_el_texto)}</ul></div>`:''}
+    ${(r.voz_de_marca&&r.voz_de_marca.length)?`<div class="card" style="margin-bottom:12px"><b style="font-size:13px">Voz de marca</b><ul style="margin:8px 0 0 18px;font-size:13px;line-height:1.7">${li(r.voz_de_marca)}</ul></div>`:''}
+    ${(r.fortalezas&&r.fortalezas.length)?`<div class="card" style="margin-bottom:12px"><b style="font-size:13px">Lo que ya funciona (mantenlo)</b><ul style="margin:8px 0 0 18px;font-size:13px;line-height:1.7">${li(r.fortalezas)}</ul></div>`:''}
+    ${(r.cambios&&r.cambios.length)?`<div class="card" style="margin-bottom:12px"><b style="font-size:13px">Que cambiar, en orden de impacto</b>${r.cambios.map(c=>`<div style="margin-top:10px;padding:10px;background:var(--bg);border:1px solid var(--line);border-radius:8px"><div style="font-size:12px;font-weight:700;color:var(--terra,#B5613B);text-transform:uppercase;letter-spacing:.4px">${esc(c.aspecto||'')}</div><div style="font-size:13px;margin-top:4px"><b>Problema:</b> ${esc(c.problema||'')}</div><div style="font-size:13px;margin-top:4px"><b>Arreglo:</b> ${esc(c.arreglo||'')}</div></div>`).join('')}</div>`:''}
+    ${r.produccion?`<div class="card"><b style="font-size:13px">Como grabarlo y editarlo mejor</b>
+      ${(r.produccion.tomas&&r.produccion.tomas.length)?`<div style="margin-top:8px;font-size:12.5px;font-weight:700">Tomas</div><ul style="margin:4px 0 0 18px;font-size:13px;line-height:1.7">${li(r.produccion.tomas)}</ul>`:''}
+      ${(r.produccion.edicion&&r.produccion.edicion.length)?`<div style="margin-top:8px;font-size:12.5px;font-weight:700">Edicion</div><ul style="margin:4px 0 0 18px;font-size:13px;line-height:1.7">${li(r.produccion.edicion)}</ul>`:''}
+      ${(r.produccion.texto_en_pantalla&&r.produccion.texto_en_pantalla.length)?`<div style="margin-top:8px;font-size:12.5px;font-weight:700">Texto en pantalla</div><ul style="margin:4px 0 0 18px;font-size:13px;line-height:1.7">${li(r.produccion.texto_en_pantalla)}</ul>`:''}
+    </div>`:''}
+  </div>`;
 }
 
 function go(view){
