@@ -431,6 +431,10 @@
       </div>
       <div class="stage">
         <div class="stage-t">2 · Lo que dices en el video (opcional, pero da el analisis fino)</div>
+        <div id="vcTransWrap" style="display:none;margin-bottom:8px">
+          <button class="btn btn-ghost" id="vcTransBtn" onclick="transcribirVC()">Sacar lo que digo del video</button>
+          <span class="hint" id="vcTransMsg" style="margin-left:8px"></span>
+        </div>
         <textarea id="vcTexto" rows="3" placeholder="Pega aqui el guion o lo que hablas en el video, palabra por palabra. Sin esto, el cerebro evalua solo lo visual y el texto en pantalla." style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit"></textarea>
         <input id="vcCtx" placeholder="Objetivo o contexto de la pieza (opcional). Ej: empujar la coleccion de viaje" style="width:100%;margin-top:8px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px">
         <div style="margin-top:10px">
@@ -2104,6 +2108,51 @@ async function vcFrames(file){
   URL.revokeObjectURL(url);
   return {frames,dur};
 }
+// Transcripcion: el audio sale del archivo EN el navegador (WAV mono 16k, max 2 min); el video nunca se sube
+let VC_TRANS_CHECKED=false;
+async function vcheckEstado(){
+  if(VC_TRANS_CHECKED) return; VC_TRANS_CHECKED=true;
+  try{ const d=await api('/api/transcribe/estado'); if(d&&d.disponible) document.getElementById('vcTransWrap').style.display='block'; }catch(e){}
+}
+async function vcAudioWav(file){
+  const buf=await file.arrayBuffer();
+  const AC=window.AudioContext||window.webkitAudioContext;
+  const ctx=new AC();
+  const decoded=await ctx.decodeAudioData(buf.slice(0));
+  await ctx.close();
+  const HZ=16000, seg=Math.min(decoded.duration,120), frames=Math.floor(seg*HZ);
+  const off=new OfflineAudioContext(1,frames,HZ);
+  const src=off.createBufferSource(); src.buffer=decoded; src.connect(off.destination); src.start(0);
+  const rendered=await off.startRendering();
+  const pcm=rendered.getChannelData(0);
+  const bytes=new DataView(new ArrayBuffer(44+pcm.length*2));
+  const wStr=(o,s)=>{ for(let i=0;i<s.length;i++) bytes.setUint8(o+i,s.charCodeAt(i)); };
+  wStr(0,'RIFF'); bytes.setUint32(4,36+pcm.length*2,true); wStr(8,'WAVE'); wStr(12,'fmt ');
+  bytes.setUint32(16,16,true); bytes.setUint16(20,1,true); bytes.setUint16(22,1,true);
+  bytes.setUint32(24,HZ,true); bytes.setUint32(28,HZ*2,true); bytes.setUint16(32,2,true); bytes.setUint16(34,16,true);
+  wStr(36,'data'); bytes.setUint32(40,pcm.length*2,true);
+  for(let i=0;i<pcm.length;i++){ const s=Math.max(-1,Math.min(1,pcm[i])); bytes.setInt16(44+i*2,s<0?s*0x8000:s*0x7fff,true); }
+  const u8=new Uint8Array(bytes.buffer);
+  let bin='';
+  for(let i=0;i<u8.length;i+=0x8000){ bin+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); }
+  return btoa(bin);
+}
+async function transcribirVC(){
+  if(!VC_FILE){ toast('Elige primero el video.'); return; }
+  const b=document.getElementById('vcTransBtn'), msg=document.getElementById('vcTransMsg');
+  b.disabled=true; b.textContent='Sacando lo que dices...'; msg.textContent='';
+  try{
+    const audioBase64=await vcAudioWav(VC_FILE);
+    const d=await api('/api/transcribe',{method:'POST',body:{audioBase64}});
+    if(d&&typeof d.texto==='string'&&d.texto.trim()){
+      document.getElementById('vcTexto').value=d.texto;
+      msg.textContent='Listo: revisa el texto y ajustalo si hace falta.';
+    }else{
+      msg.textContent='No se detecto voz clara. Escribe lo que dices a mano.';
+    }
+  }catch(e){ msg.textContent='No se pudo sacar el audio ('+e.message+'). Escribelo a mano.'; }
+  b.disabled=false; b.textContent='Sacar lo que digo del video';
+}
 async function revisarVideo(){
   if(!VC_FILE){ toast('Elige primero el video.'); return; }
   const b=document.getElementById('vcBtn'); b.disabled=true; b.textContent='Leyendo el video...';
@@ -2172,6 +2221,7 @@ function go(view){
   if(view==='watchlist') renderWatchlist();
   if(view==='cal') renderCalendar();
   if(view==='insights') renderInsights();
+  if(view==='vcheck') vcheckEstado();
 }
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmt(n){ n=+n; return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':n; }
