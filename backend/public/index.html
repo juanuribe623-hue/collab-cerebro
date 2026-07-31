@@ -494,8 +494,15 @@
           <option value="5000" selected>Min 5K seguidores</option>
           <option value="10000">Min 10K seguidores</option>
         </select>
+        <select id="radarPerfil" title="Perfil de audiencia que buscas">
+          <option value="cualquiera">Cualquier perfil de audiencia</option>
+          <option value="adulto">Audiencia adulta (25-45) con poder adquisitivo</option>
+          <option value="premium">Audiencia premium (35+), lujo y diseno</option>
+          <option value="joven">Audiencia joven (18-25)</option>
+        </select>
         <button class="btn btn-primary" onclick="correrRadar()" id="radarBtn">Correr radar</button>
       </div>
+      <div class="hint" style="margin:-4px 0 10px">Las plataformas no publican la edad de un creador. El cerebro la estima leyendo su contenido real (de que habla, como habla, que muestra) y ajusta los terminos de busqueda al perfil que elijas.</div>
       <div class="grid" id="radarGrid"><div class="empty">Corre el radar para descubrir creadores en ascenso afines a la marca.</div></div>
     </section>
 
@@ -1267,36 +1274,54 @@ async function fetchTikTokAuthors(q){
   return (items||[]).filter(v=>v && v.authorMeta && v.authorMeta.name);
 }
 
+// Perfiles de audiencia: guian los terminos de busqueda y el filtro posterior
+const RADAR_PERFILES={
+  cualquiera:{ label:'', guia:'', rangos:null },
+  adulto:{ label:'Audiencia adulta (25-45) con poder adquisitivo',
+    guia:'El equipo busca creadores cuya audiencia sea ADULTA (25 a 45 anos) y con poder adquisitivo: gente que ya compra piezas de precio alto. Evita terminos de moda adolescente, retos, bailes o tendencias virales juveniles. Prefiere universos como diseno de autor, sastreria, joyeria, decoracion y hogar, mesa y anfitriona, viajes con criterio, oficio y artesania, maternidad de 30 y pico, vida profesional.',
+    rangos:['25-34','35-45','45+'] },
+  premium:{ label:'Audiencia premium (35+), lujo y diseno',
+    guia:'El equipo busca creadores de audiencia PREMIUM, 35 anos en adelante, ligada al lujo silencioso, el coleccionismo, el arte, la decoracion de autor, los viajes boutique y la alta joyeria. Nada de contenido viral juvenil ni de moda rapida.',
+    rangos:['35-45','45+'] },
+  joven:{ label:'Audiencia joven (18-25)',
+    guia:'El equipo busca creadores de audiencia JOVEN (18 a 25 anos): moda del dia a dia, tendencias, universidad, primeros trabajos.',
+    rangos:['18-24'] },
+};
+
 async function correrRadar(){
   const b=document.getElementById('radarBtn'); b.disabled=true;
   const restore=()=>{ b.disabled=false; b.textContent='Correr radar'; };
   try{
     // (radar)
     const manual=document.getElementById('radarTerm').value.trim();
+    const perfilKey=(document.getElementById('radarPerfil')||{}).value||'cualquiera';
+    const perfil=RADAR_PERFILES[perfilKey]||RADAR_PERFILES.cualquiera;
     let queries;
     if(manual){ queries=[manual]; }
     else{
       b.textContent='Pensando que buscar...';
       queries=(await claudeJSON(
         `Generas terminos de busqueda para descubrir creadores en TikTok afines a una marca. Respondes SOLO un array JSON de strings.`,
-        `Marca: ${BRAND_CONTEXT}\n\nDame 3 terminos (2 a 4 palabras, en espanol, Colombia) para encontrar CREADORES afines a esta marca en TikTok. Responde solo el array JSON de strings.`,
+        `Marca: ${BRAND_CONTEXT}\n\n${perfil.guia}\n\nDame 3 terminos (2 a 4 palabras, en espanol, Colombia) para encontrar CREADORES afines a esta marca en TikTok${perfil.guia?' y al perfil de audiencia descrito arriba':''}. Responde solo el array JSON de strings.`,
         600)).slice(0,3);
     }
     const minFol=+(document.getElementById('radarMin').value||5000);
     b.textContent='Rastreando creadores... (1-2 min)';
     const runs=await Promise.all(queries.map(q=>fetchTikTokAuthors(q).catch(()=>[])));
     const items=runs.flat();
-    // agrupar por creador
+    // agrupar por creador (guardando textos, que son la senal para estimar el perfil)
     const by={};
     items.forEach(v=>{ const a=v.authorMeta||{}; const h=a.name; if(!h) return;
-      const o=by[h]||(by[h]={handle:h, nombre:a.nickName||h, followers:a.fans||0, verified:!!a.verified, views:[], likes:[], sample:[]});
+      const o=by[h]||(by[h]={handle:h, nombre:a.nickName||h, followers:a.fans||0, verified:!!a.verified, bio:a.signature||'', views:[], likes:[], sample:[], caps:[]});
       o.views.push(v.playCount||0); o.likes.push(v.diggCount||0);
+      if(v.text && o.caps.length<3) o.caps.push(stripSurrogates((''+v.text).slice(0,140)));
       if(v.webVideoUrl && o.sample.length<1) o.sample.push(v.webVideoUrl);
     });
     RADAR=Object.values(by).map(a=>{
       const medViews=median(a.views);
       const avgLikes=a.likes.reduce((n,x)=>n+x,0)/(a.likes.length||1);
       const o={ handle:a.handle, nombre:a.nombre, followers:a.followers, verified:a.verified,
+                bio:stripSurrogates((a.bio||'').slice(0,140)), caps:a.caps,
                 medianViews:medViews, nVids:a.views.length, sample:a.sample,
                 er: medViews? avgLikes/medViews : 0,
                 ratio: a.followers? medViews/a.followers : 0 };
@@ -1305,6 +1330,34 @@ async function correrRadar(){
     })
     .filter(a=>a.followers>=minFol && a.followers<=200000 && a.medianViews>0)
     .sort((a,b)=>b.score-a.score).slice(0,15);
+
+    // Estimacion del perfil de audiencia leyendo el contenido real de cada creador
+    if(RADAR.length){
+      b.textContent='Leyendo su contenido para estimar la audiencia...';
+      try{
+        const lista=RADAR.map(a=>({handle:a.handle, nombre:a.nombre, seguidores:a.followers, bio:a.bio, publicaciones:a.caps}));
+        const est=await claudeJSON(
+          `Eres analista de audiencias de una agencia de influencer marketing. A partir del contenido real de un creador (su nombre, bio y textos de sus publicaciones) estimas el perfil de SU AUDIENCIA. No inventes datos que no puedas inferir del contenido. Respondes SOLO un array JSON.`,
+          `Marca: ${BRAND_CONTEXT}\n\nPara cada creador de esta lista, estima el perfil de su audiencia leyendo su contenido:\n${JSON.stringify(lista)}\n\nDevuelve un array JSON, un objeto por creador, con esta forma exacta: { "handle", "edad": uno de "18-24" | "25-34" | "35-45" | "45+", "poder": uno de "alto" | "medio" | "bajo" (poder adquisitivo aparente de su audiencia), "confianza": uno de "alta" | "media" | "baja" (que tan claro lo dice el contenido), "nota": una frase corta en espanol colombiano que justifique la estimacion citando algo concreto de su contenido }. Si el contenido no alcanza para estimar, pon confianza "baja" y di por que. Prohibido usar guion largo (em-dash).`,
+          2500);
+        const mapa={}; (Array.isArray(est)?est:[]).forEach(e=>{ if(e&&e.handle) mapa[(''+e.handle).replace(/^@/,'')]=e; });
+        RADAR.forEach(a=>{ a.perfil=mapa[a.handle]||null; });
+      }catch(e){ /* si falla la estimacion, el radar sigue sirviendo sin ella */ }
+
+      // Filtro por perfil pedido (sin dejar la pantalla vacia)
+      if(perfil.rangos){
+        const encajan=RADAR.filter(a=>a.perfil && perfil.rangos.includes(a.perfil.edad));
+        if(encajan.length>=3){ RADAR=encajan; }
+        else{
+          RADAR.sort((x,y)=>{
+            const fx=(x.perfil&&perfil.rangos.includes(x.perfil.edad))?1:0;
+            const fy=(y.perfil&&perfil.rangos.includes(y.perfil.edad))?1:0;
+            return fy-fx || y.score-x.score;
+          });
+          if(encajan.length) toast('Pocos creadores encajan en ese perfil. Se muestran primero los que si.');
+        }
+      }
+    }
     renderRadar();
     toast(RADAR.length ? ('Radar: '+RADAR.length+' creadores en ascenso.') : 'Sin candidatos claros esta vez; prueba otro termino.');
   }catch(e){ toast('Error radar: '+e.message); }
@@ -1322,6 +1375,12 @@ function renderRadar(){
         <div><div class="who">@${esc(a.handle)}${a.verified?' ✓':''}</div><div class="sub2">${fmt(a.followers)} seg · ${a.ratio.toFixed(1)}x vistas/seg · ER ${(a.er*100).toFixed(1)}%</div></div>
       </div>
       <div class="desc">Vistas medianas ${fmt(a.medianViews)} en ${a.nVids} video(s). ${a.ratio>=3?'Su contenido rinde muy por encima de sus seguidores: senal de ascenso.':'Rendimiento estable frente a su base.'}</div>
+      ${a.perfil?`<div style="margin:6px 0 8px">
+        <span class="badge" style="background:#EAF1FB;color:#1E3A8A">Audiencia ${esc(a.perfil.edad)}</span>
+        <span class="badge" style="background:${a.perfil.poder==='alto'?'#E6F4EA':(a.perfil.poder==='medio'?'#FDF3E3':'#F1F1F1')};color:${a.perfil.poder==='alto'?'#1B8A4B':(a.perfil.poder==='medio'?'#8a5a12':'#6E6A60')}">Poder ${esc(a.perfil.poder)}</span>
+        <span class="badge" style="background:#F1F1F1;color:#6E6A60">Confianza ${esc(a.perfil.confianza||'')}</span>
+        ${a.perfil.nota?`<div class="hint" style="margin-top:5px">${esc(a.perfil.nota)}</div>`:''}
+      </div>`:''}
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${a.sample[0]?`<a class="est-btn" href="${a.sample[0]}" target="_blank" style="text-decoration:none">Ver video</a>`:''}
         <button class="est-btn" onclick="wlFromRadar('${esc(a.handle)}')">+ Watchlist</button>
