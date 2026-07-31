@@ -487,6 +487,7 @@
         </div>
       </div>
       <div class="toolbar">
+        <input id="radarCiudad" placeholder="Ciudad o mercado (ej: Cartagena)" style="width:200px" />
         <input class="grow" id="radarTerm" placeholder="Termino opcional para enfocar (vacio = usa el Brief de la marca)" />
         <select id="radarMin">
           <option value="0">Sin filtro de seguidores</option>
@@ -502,7 +503,7 @@
         </select>
         <button class="btn btn-primary" onclick="correrRadar()" id="radarBtn">Correr radar</button>
       </div>
-      <div class="hint" style="margin:-4px 0 10px">Las plataformas no publican la edad de un creador. El cerebro la estima leyendo su contenido real (de que habla, como habla, que muestra) y ajusta los terminos de busqueda al perfil que elijas.</div>
+      <div class="hint" style="margin:-4px 0 10px">Con una ciudad, el cerebro busca por varios ejes (moda, vida local, gastronomia, hoteles, bodas), porque los mejores creadores casi nunca aparecen en el eje obvio. Tambien descarta negocios, tiendas y agencias, y estima el perfil de audiencia leyendo el contenido real de cada cuenta.</div>
       <div class="grid" id="radarGrid"><div class="empty">Corre el radar para descubrir creadores en ascenso afines a la marca.</div></div>
     </section>
 
@@ -1294,16 +1295,22 @@ async function correrRadar(){
   try{
     // (radar)
     const manual=document.getElementById('radarTerm').value.trim();
+    const ciudad=((document.getElementById('radarCiudad')||{}).value||'').trim();
     const perfilKey=(document.getElementById('radarPerfil')||{}).value||'cualquiera';
     const perfil=RADAR_PERFILES[perfilKey]||RADAR_PERFILES.cualquiera;
     let queries;
     if(manual){ queries=[manual]; }
     else{
       b.textContent='Pensando que buscar...';
+      // Con ciudad se busca por EJES: los mejores creadores casi nunca estan en el eje obvio
+      const ejes = ciudad
+        ? `Genera los terminos por EJES DISTINTOS, no todos de moda: (1) moda y compras, (2) vida local y cotidiana, (3) gastronomia y sitios de la ciudad, (4) hoteles y donde hospedarse, (5) bodas y eventos. Esto importa: en busquedas reales, los creadores mas valiosos aparecen en los ejes que NO son el obvio.`
+        : `Varia los angulos entre producto, estilo de vida, oficio y ocasion.`;
+      const n = ciudad ? 5 : 3;
       queries=(await claudeJSON(
         `Generas terminos de busqueda para descubrir creadores en TikTok afines a una marca. Respondes SOLO un array JSON de strings.`,
-        `Marca: ${BRAND_CONTEXT}\n\n${perfil.guia}\n\nDame 3 terminos (2 a 4 palabras, en espanol, Colombia) para encontrar CREADORES afines a esta marca en TikTok${perfil.guia?' y al perfil de audiencia descrito arriba':''}. Responde solo el array JSON de strings.`,
-        600)).slice(0,3);
+        `Marca: ${BRAND_CONTEXT}\n${ciudad?`Mercado objetivo: ${ciudad}. TODOS los terminos deben estar anclados a esa ciudad (incluye su nombre en cada termino).`:''}\n${perfil.guia}\n\n${ejes}\n\nDame ${n} terminos de busqueda (2 a 4 palabras, en espanol de Colombia) para encontrar CREADORES en TikTok${perfil.guia?', afines al perfil de audiencia descrito arriba':''}. Responde solo el array JSON de strings.`,
+        700)).slice(0,n);
     }
     const minFol=+(document.getElementById('radarMin').value||5000);
     b.textContent='Rastreando creadores... (1-2 min)';
@@ -1331,18 +1338,24 @@ async function correrRadar(){
     .filter(a=>a.followers>=minFol && a.followers<=200000 && a.medianViews>0)
     .sort((a,b)=>b.score-a.score).slice(0,15);
 
-    // Estimacion del perfil de audiencia leyendo el contenido real de cada creador
+    // Una sola pasada de IA: separa creadores de negocios y estima el perfil de audiencia
     if(RADAR.length){
-      b.textContent='Leyendo su contenido para estimar la audiencia...';
+      b.textContent='Separando creadores de negocios y leyendo su contenido...';
       try{
         const lista=RADAR.map(a=>({handle:a.handle, nombre:a.nombre, seguidores:a.followers, bio:a.bio, publicaciones:a.caps}));
         const est=await claudeJSON(
-          `Eres analista de audiencias de una agencia de influencer marketing. A partir del contenido real de un creador (su nombre, bio y textos de sus publicaciones) estimas el perfil de SU AUDIENCIA. No inventes datos que no puedas inferir del contenido. Respondes SOLO un array JSON.`,
-          `Marca: ${BRAND_CONTEXT}\n\nPara cada creador de esta lista, estima el perfil de su audiencia leyendo su contenido:\n${JSON.stringify(lista)}\n\nDevuelve un array JSON, un objeto por creador, con esta forma exacta: { "handle", "edad": uno de "18-24" | "25-34" | "35-45" | "45+", "poder": uno de "alto" | "medio" | "bajo" (poder adquisitivo aparente de su audiencia), "confianza": uno de "alta" | "media" | "baja" (que tan claro lo dice el contenido), "nota": una frase corta en espanol colombiano que justifique la estimacion citando algo concreto de su contenido }. Si el contenido no alcanza para estimar, pon confianza "baja" y di por que. Prohibido usar guion largo (em-dash).`,
-          2500);
+          `Eres analista de una agencia de influencer marketing. Haces dos cosas con cada cuenta: (1) decides si es una PERSONA CREADORA de contenido o un NEGOCIO, y (2) estimas el perfil de su audiencia leyendo su contenido real. Eres estricto separando negocios: en busquedas por ciudad, mas de la mitad de los resultados suelen ser tiendas, agencias de tours, inmobiliarias, hoteles y restaurantes promocionandose. Senales de negocio: la bio tiene telefono de reservas, direccion, precios, "envios", "RNT", "agencia", "tienda", "reserva aqui", o el contenido es catalogo de producto propio. Senales de creador: habla en primera persona, recomienda lugares o marcas de terceros, tiene correo de colaboraciones, cuenta su vida. No inventes lo que no puedas inferir del contenido. Respondes SOLO un array JSON.`,
+          `Marca: ${BRAND_CONTEXT}\n\nClasifica y estima cada cuenta de esta lista:\n${JSON.stringify(lista)}\n\nDevuelve un array JSON, un objeto por cuenta, con esta forma exacta: { "handle", "tipo": uno de "creador" | "negocio", "edad": uno de "18-24" | "25-34" | "35-45" | "45+", "poder": uno de "alto" | "medio" | "bajo" (poder adquisitivo aparente de su audiencia), "confianza": uno de "alta" | "media" | "baja" (que tan claro lo dice el contenido), "para_que": frase corta de para que le serviria a esta marca (ej: "invitarla a la tienda", "alianza comercial, no contenido", "solo seguirla por ahora"), "nota": una frase corta en espanol colombiano que justifique la estimacion citando algo concreto de su contenido }. Si el contenido no alcanza, pon confianza "baja" y di por que. Prohibido usar guion largo (em-dash).`,
+          3000);
         const mapa={}; (Array.isArray(est)?est:[]).forEach(e=>{ if(e&&e.handle) mapa[(''+e.handle).replace(/^@/,'')]=e; });
         RADAR.forEach(a=>{ a.perfil=mapa[a.handle]||null; });
       }catch(e){ /* si falla la estimacion, el radar sigue sirviendo sin ella */ }
+
+      // Descartar negocios: es el ruido mas grande de una busqueda por ciudad
+      const creadores=RADAR.filter(a=>!a.perfil || a.perfil.tipo!=='negocio');
+      const descartados=RADAR.length-creadores.length;
+      if(creadores.length>=3){ RADAR=creadores; if(descartados) toast('Se descartaron '+descartados+' cuenta(s) de negocio.'); }
+      else if(descartados){ RADAR.sort((x,y)=>((x.perfil&&x.perfil.tipo==='negocio')?1:0)-((y.perfil&&y.perfil.tipo==='negocio')?1:0)); }
 
       // Filtro por perfil pedido (sin dejar la pantalla vacia)
       if(perfil.rangos){
@@ -1376,10 +1389,12 @@ function renderRadar(){
       </div>
       <div class="desc">Vistas medianas ${fmt(a.medianViews)} en ${a.nVids} video(s). ${a.ratio>=3?'Su contenido rinde muy por encima de sus seguidores: senal de ascenso.':'Rendimiento estable frente a su base.'}</div>
       ${a.perfil?`<div style="margin:6px 0 8px">
+        ${a.perfil.tipo==='negocio'?`<span class="badge" style="background:#FDEBEC;color:#B00020">Negocio, no creador</span>`:''}
         <span class="badge" style="background:#EAF1FB;color:#1E3A8A">Audiencia ${esc(a.perfil.edad)}</span>
         <span class="badge" style="background:${a.perfil.poder==='alto'?'#E6F4EA':(a.perfil.poder==='medio'?'#FDF3E3':'#F1F1F1')};color:${a.perfil.poder==='alto'?'#1B8A4B':(a.perfil.poder==='medio'?'#8a5a12':'#6E6A60')}">Poder ${esc(a.perfil.poder)}</span>
         <span class="badge" style="background:#F1F1F1;color:#6E6A60">Confianza ${esc(a.perfil.confianza||'')}</span>
-        ${a.perfil.nota?`<div class="hint" style="margin-top:5px">${esc(a.perfil.nota)}</div>`:''}
+        ${a.perfil.para_que?`<div style="margin-top:5px;font-size:12.5px"><b style="color:var(--green)">Sirve para:</b> ${esc(a.perfil.para_que)}</div>`:''}
+        ${a.perfil.nota?`<div class="hint" style="margin-top:3px">${esc(a.perfil.nota)}</div>`:''}
       </div>`:''}
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${a.sample[0]?`<a class="est-btn" href="${a.sample[0]}" target="_blank" style="text-decoration:none">Ver video</a>`:''}
