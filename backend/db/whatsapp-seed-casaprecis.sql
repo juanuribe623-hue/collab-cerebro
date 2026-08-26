@@ -11,10 +11,12 @@
 -- manual no tenia el dato, se dejo escrita una instruccion explicita para
 -- escalar a Gabi en vez de inventarlo.
 --
--- Antes de correr esto: reemplaza REEMPLAZAR_COMPANY_ID por el id real
--- de la empresa Casa Precis. Para obtenerlo:
---   SELECT id, nombre FROM companies;
--- =====================================================================
+-- No hay que reemplazar nada: el id de la empresa se resuelve solo
+-- buscando 'Casa Precis' en la tabla companies.
+-- Si la empresa esta guardada con otro nombre, Postgres devuelve un error
+-- diciendo que company_id quedo nulo. En ese caso corre primero esto:
+--     SELECT id, name FROM companies;
+-- y cambia 'casa precis' de abajo por el nombre real.
 
 INSERT INTO wa_config (
   company_id,
@@ -28,7 +30,7 @@ INSERT INTO wa_config (
   silencio_min,
   updated_at
 ) VALUES (
-  'REEMPLAZAR_COMPANY_ID'::uuid,
+  (SELECT id FROM companies WHERE name ILIKE '%casa precis%' LIMIT 1),
   true,
   NULL,
   'Pris',
@@ -373,5 +375,5 @@ ON CONFLICT (company_id) DO UPDATE SET
 --        silencio_min, length(system_prompt) AS largo_prompt,
 --        length(base_conocimiento) AS largo_conocimiento
 -- FROM wa_config
--- WHERE company_id = 'REEMPLAZAR_COMPANY_ID'::uuid;
+-- WHERE company_id = (SELECT id FROM companies WHERE name ILIKE '%casa precis%' LIMIT 1);
 -- =====================================================================
