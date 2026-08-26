@@ -67,7 +67,8 @@ function armarSystem(cfg) {
    No dependemos de que el modelo se acuerde, porque es una obligacion legal. */
 function conAvisoLegal(esPrimero, texto, cfg) {
   if (!esPrimero) return texto;
-  const faltaIA     = !/inteligencia artificial/i.test(texto);
+  /* tolerante a saltos de linea: el modelo puede partir la frase en dos renglones */
+  const faltaIA     = !/inteligencia\s+artificial/i.test(texto);
   const primerNombre = String(cfg.nombre_humano || '').split(' ')[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const faltaHumano = primerNombre ? !new RegExp(primerNombre, 'i').test(texto) : false;
   if (!faltaIA && !faltaHumano) return texto;
