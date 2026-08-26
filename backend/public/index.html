@@ -185,6 +185,43 @@
   .sw .hx{font-size:12px;font-weight:700;color:var(--navy);margin-top:5px;font-family:ui-monospace,monospace}
   .sw .nm{font-size:12px;color:var(--slate)}
   .sw .us{font-size:11px;color:var(--gray);line-height:1.3}
+  /* whatsapp */
+  .wa-test summary{outline:none}
+  .wa-wrap{display:flex;gap:14px;height:calc(100vh - 220px);min-height:420px}
+  .wa-list-col{width:320px;flex-shrink:0;display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .wa-search{margin:10px;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px}
+  .wa-list{flex:1;overflow-y:auto;border-top:1px solid var(--line)}
+  .wa-item{padding:11px 14px;border-bottom:1px solid var(--line);cursor:pointer;position:relative}
+  .wa-item:hover{background:var(--bg)}
+  .wa-item.active{background:var(--pale)}
+  .wa-item-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .wa-item-name{font-size:13.5px;font-weight:700;color:var(--slate);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wa-item-time{font-size:11px;color:var(--gray);flex-shrink:0}
+  .wa-item-bottom{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:3px}
+  .wa-item-preview{font-size:12px;color:var(--gray);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wa-dot{width:8px;height:8px;border-radius:50%;background:var(--blue);flex-shrink:0}
+  .wa-taken{display:inline-block;margin-top:5px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:#FCEFE7;color:var(--terra)}
+  .wa-thread-col{flex:1;min-width:0}
+  .wa-thread{height:100%;display:flex;flex-direction:column;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .wa-thread .empty{margin:auto}
+  .wa-thread-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .wa-thread-name{font-size:14px;font-weight:700;color:var(--navy)}
+  .wa-thread-tel{font-size:12px;color:var(--gray)}
+  .wa-switch-wrap{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);cursor:pointer}
+  .wa-notice{background:#FCEFE7;color:var(--terra);font-size:12px;padding:8px 16px}
+  .wa-msgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:8px;background:var(--bg)}
+  .wa-bubble-row{display:flex}
+  .wa-bubble-row.out{justify-content:flex-end}
+  .wa-bubble-row.in{justify-content:flex-start}
+  .wa-bubble{max-width:70%;padding:8px 11px;border-radius:10px;font-size:13px;line-height:1.4}
+  .wa-bubble.cliente{background:#fff;border:1px solid var(--line);color:var(--slate);border-bottom-left-radius:2px}
+  .wa-bubble.bot{background:var(--pale);color:var(--navy);border-bottom-right-radius:2px}
+  .wa-bubble.humano{background:var(--navy);color:#fff;border-bottom-right-radius:2px}
+  .wa-tag{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;opacity:.75;margin-bottom:3px}
+  .wa-bubble-text{white-space:pre-wrap;word-break:break-word}
+  .wa-bubble-time{font-size:10px;opacity:.65;margin-top:4px;text-align:right}
+  .wa-input-row{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--line);align-items:flex-end}
+  .wa-input-row textarea{flex:1;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;resize:none;max-height:100px}
 </style>
 </head>
 <body>
@@ -237,6 +274,7 @@
       <a data-view="watchlist" onclick="go('watchlist')">Watchlist</a>
       <a data-view="cal" onclick="go('cal')">Calendario</a>
       <a data-view="insights" onclick="go('insights')">Insights</a>
+      <a data-view="wa" onclick="go('wa')">WhatsApp</a>
     </nav>
     <div class="user">
       <div id="userEmail"></div>
@@ -566,6 +604,43 @@
           <textarea id="hookIn" placeholder="Pega un hook (los primeros 3 segundos) y te digo su potencial de guardado/compartido + variantes mas fuertes."></textarea>
           <button class="btn btn-primary" onclick="optimizarHook()" id="hookBtn">Analizar hook</button>
           <div id="hookOut"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- WHATSAPP -->
+    <section id="view-wa" class="hidden">
+      <div class="head">
+        <div>
+          <h2>WhatsApp</h2>
+          <div class="sub">Bandeja de conversaciones. Responde tu o deja que el asistente conteste por ti.</div>
+        </div>
+      </div>
+
+      <details class="card wa-test" id="waTestPanel" style="display:none;margin-bottom:16px">
+        <summary style="cursor:pointer;font-weight:700;color:var(--navy);font-size:13px">Modo prueba</summary>
+        <div style="margin-top:12px">
+          <div class="hint" style="margin-bottom:10px">Todavia no hay un numero real conectado. Simula un mensaje entrante para probar el flujo completo.</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+            <input id="waSimTel" placeholder="Telefono" value="573001112233" style="width:170px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">
+            <input id="waSimNombre" placeholder="Nombre (opcional)" style="width:170px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px">
+          </div>
+          <textarea id="waSimTexto" rows="2" placeholder="Escribe el mensaje que llega del cliente" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit"></textarea>
+          <div style="margin-top:8px">
+            <button class="btn btn-primary" id="waSimBtn" onclick="simularMensajeWA()">Simular mensaje entrante</button>
+          </div>
+        </div>
+      </details>
+
+      <div class="wa-wrap">
+        <div class="wa-list-col">
+          <input id="waSearch" class="wa-search" placeholder="Buscar por nombre o telefono" oninput="filtrarChatsWA()">
+          <div id="waList" class="wa-list"><div class="empty">Cargando conversaciones...</div></div>
+        </div>
+        <div class="wa-thread-col">
+          <div id="waThread" class="wa-thread">
+            <div class="empty">Elige una conversacion de la lista.</div>
+          </div>
         </div>
       </div>
     </section>
@@ -2284,7 +2359,216 @@ function renderVCheck(r){
   </div>`;
 }
 
+// ───────── WhatsApp ─────────
+let WA_CHATS = [];
+let WA_ACTIVE = null;
+let WA_ACTIVE_CHAT = null;
+let waListInterval = null;
+let waThreadInterval = null;
+
+function waHora(ts){
+  if(!ts) return '';
+  const d = new Date(ts);
+  if(isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+}
+function waTrunc(s,n){
+  s = s || '';
+  return s.length > n ? s.slice(0,n-1)+'...' : s;
+}
+
+async function waEstado(){
+  const panel = document.getElementById('waTestPanel');
+  try{
+    const r = await api('/api/whatsapp/estado');
+    if(panel) panel.style.display = (r && r.modo==='prueba') ? 'block' : 'none';
+  }catch(e){
+    if(panel) panel.style.display = 'none';
+  }
+}
+
+async function cargarChatsWA(){
+  try{
+    const r = await api('/api/whatsapp/chats');
+    WA_CHATS = r.chats || [];
+    renderListaWA();
+  }catch(e){
+    toast('No se pudo cargar la lista de chats: '+e.message);
+  }
+}
+
+function filtrarChatsWA(){ renderListaWA(); }
+
+function renderListaWA(){
+  const list = document.getElementById('waList');
+  if(!list) return;
+  const term = (document.getElementById('waSearch')?.value || '').toLowerCase().trim();
+  const filtrados = WA_CHATS.filter(c=>{
+    if(!term) return true;
+    const n = (c.nombre||'').toLowerCase();
+    const t = (c.telefono||'').toLowerCase();
+    return n.includes(term) || t.includes(term);
+  });
+  if(!filtrados.length){ list.innerHTML = '<div class="empty">No hay conversaciones que coincidan.</div>'; return; }
+  list.innerHTML = filtrados.map(c=>{
+    const nombre = c.nombre || c.telefono || 'Sin numero';
+    const preview = waTrunc(c.ultimo||'', 42);
+    const hora = waHora(c.ts);
+    const activo = String(c.id)===String(WA_ACTIVE) ? ' active' : '';
+    return `<div class="wa-item${activo}" onclick="abrirChatWA('${c.id}')">
+      <div class="wa-item-top">
+        <span class="wa-item-name">${esc(nombre)}</span>
+        <span class="wa-item-time">${esc(hora)}</span>
+      </div>
+      <div class="wa-item-bottom">
+        <span class="wa-item-preview">${esc(preview)}</span>
+        ${c.no_leido?'<span class="wa-dot"></span>':''}
+      </div>
+      ${c.tomado?'<span class="wa-taken">Gabi</span>':''}
+    </div>`;
+  }).join('');
+}
+
+async function abrirChatWA(id){
+  WA_ACTIVE = id;
+  renderListaWA();
+  clearInterval(waThreadInterval);
+  await cargarHiloWA();
+  waThreadInterval = setInterval(cargarHiloWA, 10000);
+}
+
+async function cargarHiloWA(){
+  if(!WA_ACTIVE) return;
+  try{
+    const r = await api('/api/whatsapp/chats/'+WA_ACTIVE);
+    WA_ACTIVE_CHAT = r;
+    const c = WA_CHATS.find(x=>String(x.id)===String(WA_ACTIVE));
+    if(c) c.no_leido = false;
+    renderListaWA();
+    renderHiloWA();
+  }catch(e){
+    toast('No se pudo cargar la conversacion: '+e.message);
+  }
+}
+
+function waBurbuja(m){
+  const lado = m.de==='cliente' ? 'in' : 'out';
+  const clase = m.de==='bot' ? 'bot' : (m.de==='humano' ? 'humano' : 'cliente');
+  const tag = m.de==='bot' ? '<span class="wa-tag">Asistente</span>' : (m.de==='humano' ? '<span class="wa-tag">Gabi</span>' : '');
+  return `<div class="wa-bubble-row ${lado}">
+    <div class="wa-bubble ${clase}">
+      ${tag}
+      <div class="wa-bubble-text">${esc(m.texto||'')}</div>
+      <div class="wa-bubble-time">${esc(waHora(m.ts))}</div>
+    </div>
+  </div>`;
+}
+
+function renderHiloWA(){
+  const wrap = document.getElementById('waThread');
+  if(!wrap) return;
+  if(!WA_ACTIVE_CHAT){ wrap.innerHTML = '<div class="empty">Elige una conversacion de la lista.</div>'; return; }
+  const chat = WA_ACTIVE_CHAT.chat || {};
+  const msgs = WA_ACTIVE_CHAT.mensajes || [];
+  const nombre = chat.nombre || chat.telefono || 'Sin numero';
+  wrap.innerHTML = `
+    <div class="wa-thread-head">
+      <div>
+        <div class="wa-thread-name">${esc(nombre)}</div>
+        <div class="wa-thread-tel">${esc(chat.telefono||'')}</div>
+      </div>
+      <label class="wa-switch-wrap">
+        <input type="checkbox" id="waTomarChk" ${chat.tomado?'checked':''} onchange="toggleTomarWA(this.checked)">
+        Atender yo
+      </label>
+    </div>
+    ${chat.tomado?'<div class="wa-notice">El asistente esta en silencio en esta conversacion.</div>':''}
+    <div class="wa-msgs" id="waMsgs">
+      ${msgs.length ? msgs.map(waBurbuja).join('') : '<div class="empty">Todavia no hay mensajes.</div>'}
+    </div>
+    <div class="wa-input-row">
+      <textarea id="waTexto" rows="1" placeholder="Escribe un mensaje" onkeydown="waKeydown(event)"></textarea>
+      <button class="btn btn-primary" onclick="enviarWA()" id="waSendBtn">Enviar</button>
+    </div>
+  `;
+  const msgsEl = document.getElementById('waMsgs');
+  if(msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+
+function waKeydown(e){
+  if(e.key==='Enter' && !e.shiftKey){
+    e.preventDefault();
+    enviarWA();
+  }
+}
+
+async function enviarWA(){
+  const el = document.getElementById('waTexto');
+  const texto = (el?.value || '').trim();
+  if(!texto || !WA_ACTIVE) return;
+  const btn = document.getElementById('waSendBtn');
+  if(btn) btn.disabled = true;
+  try{
+    await api('/api/whatsapp/chats/'+WA_ACTIVE+'/enviar', {method:'POST', body:{texto}});
+    if(el) el.value = '';
+    await cargarHiloWA();
+  }catch(e){
+    toast('No se pudo enviar el mensaje: '+e.message);
+  }
+  if(btn) btn.disabled = false;
+}
+
+async function toggleTomarWA(tomado){
+  if(!WA_ACTIVE) return;
+  try{
+    await api('/api/whatsapp/chats/'+WA_ACTIVE+'/tomar', {method:'POST', body:{tomado}});
+  }catch(e){
+    toast('No se pudo cambiar el modo de atencion: '+e.message);
+  }
+  await cargarHiloWA();
+}
+
+async function simularMensajeWA(){
+  const telefono = (document.getElementById('waSimTel')?.value || '').trim();
+  const nombre = (document.getElementById('waSimNombre')?.value || '').trim();
+  const texto = (document.getElementById('waSimTexto')?.value || '').trim();
+  if(!telefono || !texto){ toast('Escribe el telefono y el mensaje para simular.'); return; }
+  const btn = document.getElementById('waSimBtn');
+  if(btn) btn.disabled = true;
+  try{
+    const r = await api('/api/whatsapp/simular', {method:'POST', body:{telefono, texto, nombre}});
+    const txtEl = document.getElementById('waSimTexto');
+    if(txtEl) txtEl.value = '';
+    await cargarChatsWA();
+    if(r && r.chat_id) await abrirChatWA(r.chat_id);
+    toast('Mensaje simulado.');
+  }catch(e){
+    toast('No se pudo simular el mensaje: '+e.message);
+  }
+  if(btn) btn.disabled = false;
+}
+
+function pararWA(){
+  clearInterval(waListInterval);
+  clearInterval(waThreadInterval);
+  waListInterval = null;
+  waThreadInterval = null;
+}
+
+async function abrirVistaWA(){
+  pararWA();
+  waEstado();
+  await cargarChatsWA();
+  waListInterval = setInterval(cargarChatsWA, 10000);
+  if(WA_ACTIVE){
+    await cargarHiloWA();
+    waThreadInterval = setInterval(cargarHiloWA, 10000);
+  }
+}
+
+let CURRENT_VIEW = null;
 function go(view){
+  if(CURRENT_VIEW==='wa' && view!=='wa') pararWA();
   document.querySelectorAll('#sidebar nav a').forEach(a=>a.classList.toggle('active', a.dataset.view===view));
   document.querySelectorAll('#main > section').forEach(s=>s.classList.toggle('hidden', s.id!=='view-'+view));
   if(view==='prod') refreshTrendPicker();
@@ -2296,6 +2580,8 @@ function go(view){
   if(view==='cal') renderCalendar();
   if(view==='insights') renderInsights();
   if(view==='vcheck') vcheckEstado();
+  if(view==='wa') abrirVistaWA();
+  CURRENT_VIEW = view;
 }
 function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function fmt(n){ n=+n; return n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':n; }
