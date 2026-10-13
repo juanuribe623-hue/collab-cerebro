@@ -78,6 +78,16 @@ function conAvisoLegal(esPrimero, texto, cfg) {
   return texto + '\n\n' + extra.join(' ');
 }
 
+/* WhatsApp no entiende Markdown: la negrita es *un* asterisco, no dos.
+   Sin esta limpieza el cliente ve los asteriscos escritos en el mensaje. */
+function aFormatoWhatsApp(texto) {
+  return String(texto)
+    .replace(/\*\*\*(.+?)\*\*\*/gs, '*$1*')   /* ***x*** -> *x*   */
+    .replace(/\*\*(.+?)\*\*/gs,     '*$1*')   /* **x**   -> *x*   */
+    .replace(/^#{1,6}\s+/gm,        '')       /* quita encabezados */
+    .replace(/^\s*[-*]\s+/gm,       '• ');    /* vinetas legibles  */
+}
+
 /* Horario. modo "siempre" = el bot contesta 24/7.
    modo "fuera_de_horario" = calla de lunes a viernes entre inicio y fin (hora Bogota). */
 function botDebeResponder(horario, now = new Date()) {
@@ -289,7 +299,7 @@ async function procesarEntrante(companyId, telefono, contenido, nombreSugerido) 
   }
   if (!salida.texto) return { chat_id: chat.id, respuesta: null, motivo: 'el asistente no genero respuesta' };
 
-  const texto = conAvisoLegal(esPrimero, salida.texto, cfg);
+  const texto = aFormatoWhatsApp(conAvisoLegal(esPrimero, salida.texto, cfg));
   const env = await enviarWhatsApp(chat.telefono, texto);
   if (!env.ok) return { chat_id: chat.id, respuesta: null, motivo: env.error };
 
@@ -464,7 +474,7 @@ router.post('/chats/:id/tomar', async (req, res) => {
           const salida = await correrAsistente(cfg, hist);
           if (salida.texto) {
             const esPrimero = !hist.some(m => m.de === 'bot');
-            const texto = conAvisoLegal(esPrimero, salida.texto, cfg);
+            const texto = aFormatoWhatsApp(conAvisoLegal(esPrimero, salida.texto, cfg));
             const env = await enviarWhatsApp(chat.telefono, texto);
             if (env.ok) {
               await agregarMensaje({ id: chat.id, company_id: chat.company_id }, 'bot', texto);
