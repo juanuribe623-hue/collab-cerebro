@@ -275,6 +275,11 @@ async function historialDe(chatId) {
  */
 async function procesarEntrante(companyId, telefono, contenido, nombreSugerido) {
   const cfg  = await leerConfig(companyId);
+  /* Una sola linea que responde las tres preguntas de siempre cuando el bot
+     se queda callado: que config cargo (si dice "Asistente" es la empresa
+     equivocada), si esta encendido, y si hay token para enviar de verdad. */
+  console.log('[wa] config', cfg.nombre_bot, 'activo=' + cfg.activo,
+              'modo=' + (modoPrueba() ? 'PRUEBA' : 'real'));
   const chat = await buscarOCrearChat(companyId, telefono, nombreSugerido);
 
   await agregarMensaje(chat, 'cliente', contenido);
@@ -351,7 +356,12 @@ router.post('/webhook', async (req, res) => {
     else if (msg.type === 'video')    cont = { tipo: 'video', mediaId: msg.video.id, mime: msg.video.mime_type, texto: msg.video.caption || '[video]' };
     else return;
 
-    await procesarEntrante(companyId, msg.from, cont, perfil);
+    /* procesarEntrante devuelve un motivo cada vez que decide no contestar.
+       Antes se descartaba y el bot se quedaba mudo sin dejar rastro. */
+    console.log('[wa] entra', msg.type, 'de', msg.from);
+    const r = await procesarEntrante(companyId, msg.from, cont, perfil);
+    if (r && r.respuesta) console.log('[wa] respondido ok, chat', r.chat_id);
+    else console.log('[wa] SIN RESPUESTA:', (r && r.motivo) || 'sin motivo');
   } catch (e) {
     console.error('[wa webhook]', e.message);
   }
