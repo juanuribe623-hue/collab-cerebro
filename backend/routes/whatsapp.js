@@ -85,7 +85,13 @@ function aFormatoWhatsApp(texto) {
     .replace(/\*\*\*(.+?)\*\*\*/gs, '*$1*')   /* ***x*** -> *x*   */
     .replace(/\*\*(.+?)\*\*/gs,     '*$1*')   /* **x**   -> *x*   */
     .replace(/^#{1,6}\s+/gm,        '')       /* quita encabezados */
-    .replace(/^\s*[-*]\s+/gm,       '• ');    /* vinetas legibles  */
+    .replace(/^\s*[-*]\s+/gm,       '• ')     /* vinetas legibles  */
+    /* Guion largo y guion medio: nadie los escribe en WhatsApp, delatan
+       que el texto lo redacto una IA. Se pide tambien en el prompt, pero
+       el modelo lo olvida, asi que aqui se garantiza. */
+    .replace(/\s*[—–]\s*/g,         ', ')
+    .replace(/,\s*,/g,              ',')      /* evita ", ," al reemplazar */
+    .replace(/\s+([,.;:!?])/g,      '$1');    /* evita " ," suelto         */
 }
 
 /* Horario. modo "siempre" = el bot contesta 24/7.
