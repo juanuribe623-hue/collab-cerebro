@@ -53,8 +53,13 @@ const UA = 'CollabCerebro/1.0 (asistente WhatsApp; +https://collab.com.co)';
 
 const dormir = ms => new Promise(r => setTimeout(r, ms));
 
+/* Cuanto puede esperar un cliente de WhatsApp a que cargue el catalogo la
+   primera vez. Mas que esto se siente abandono. */
+const ESPERA_CLIENTE_MS = 12000;
+
 const cache   = new Map();  /* dominio -> { ts, productos, via } */
 const enVuelo = new Map();  /* dominio -> Promise, para no pedir lo mismo dos veces a la vez */
+const fallido = new Set();  /* dominios que ya no cargan ni reintentando */
 
 /* ------------------------------------------------------------------ */
 /* Normalizacion                                                       */
@@ -387,6 +392,7 @@ function refrescar(dominio, token) {
     .then(productos => {
       if (!productos.length) throw new Error('el catalogo vino vacio');
       cache.set(dominio, { ts: Date.now(), productos, via });
+      fallido.delete(dominio);
       console.log(`[catalogo] ${dominio}: ${productos.length} productos via ${via}`);
       return productos;
     })
@@ -425,13 +431,18 @@ async function catalogoDe(dominio, token) {
 }
 
 /**
- * Si hay catalogo cargado, aunque sea viejo.
+ * Si vale la pena ofrecerle la herramienta de busqueda al asistente.
  *
- * Sirve para no ofrecerle al asistente una herramienta que va a fallar: es
- * mejor que se comporte como antes a que prometa buscar y se quede con las
- * manos vacias delante del cliente.
+ * Al principio esto exigia catalogo ya cargado, y resulto peor el remedio:
+ * durante el minuto que tarda en cargar despues de cada despliegue, el
+ * asistente se quedaba sin la herramienta, pero el prompt le sigue diciendo
+ * que muestre producto. Entonces decia "dejame busco lo que tenemos" y no
+ * buscaba nada, porque no tenia con que. Paso de verdad el 29 de octubre.
+ *
+ * Ahora solo se niega cuando el catalogo ya se dio por vencido. Mientras
+ * carga se ofrece igual, y buscarEnTienda espera un rato razonable.
  */
-const estaListo = dominio => Boolean(cache.get(dominio));
+const sirveLaBusqueda = dominio => Boolean(dominio) && !fallido.has(dominio);
 
 /**
  * Se llama al arrancar, para que el primer cliente no pague la espera.
@@ -452,10 +463,21 @@ function precalentar(cfgCatalogo, intento = 0) {
       console.log(`[catalogo] reintento en ${espera / 60000} min`);
       setTimeout(() => precalentar(cfgCatalogo, intento + 1), espera).unref();
     } else {
-      console.error(`[catalogo] ${dominio} no carga. El asistente sigue sin la herramienta de busqueda.`);
+      fallido.add(dominio);
+      console.error(`[catalogo] ${dominio} no carga. El asistente queda sin la herramienta de busqueda.`);
     }
   });
 }
+
+/* Para que el cliente no se quede esperando a que baje el catalogo entero.
+   La carga sigue por detras: lo que se abandona es la espera, no el trabajo. */
+const conTiempo = (promesa, ms) => Promise.race([
+  promesa,
+  new Promise((_, rechazar) => {
+    const t = setTimeout(() => rechazar(new Error('CATALOGO_CARGANDO')), ms);
+    if (t.unref) t.unref();
+  }),
+]);
 
 /* ------------------------------------------------------------------ */
 /* Busqueda                                                            */
@@ -573,8 +595,25 @@ async function buscarEnTienda(cfgCatalogo, filtros) {
   if (!dominio) throw new Error('La empresa no tiene catalogo configurado');
   const token = tokenDe(cfgCatalogo);
 
-  const productos = await catalogoDe(dominio, token);
-  const crudos    = buscar(productos, filtros).slice(0, 3);
+  let productos;
+  try {
+    productos = await conTiempo(catalogoDe(dominio, token), ESPERA_CLIENTE_MS);
+  } catch (e) {
+    if (e.message !== 'CATALOGO_CARGANDO') throw e;
+    /* Primera busqueda despues de un despliegue: el catalogo todavia esta
+       bajando. Se le dice al modelo la verdad para que diga algo util en vez
+       de prometer una busqueda que no ocurrio. */
+    console.warn(`[catalogo] ${dominio} todavia cargando, el cliente no espera mas`);
+    return {
+      items: [],
+      texto: 'El catalogo todavia se esta cargando, no alcance a traer las opciones. ' +
+             'No digas que vas a buscar ni que ya buscaste. Preguntale algo util ' +
+             'mientras tanto, como el color o la ocasion, y con eso vuelves a buscar ' +
+             'en tu siguiente mensaje.',
+    };
+  }
+
+  const crudos = buscar(productos, filtros).slice(0, 3);
 
   if (!crudos.length) {
     return {
@@ -609,7 +648,7 @@ async function buscarEnTienda(cfgCatalogo, filtros) {
   return { items, texto: paraElModelo(items) };
 }
 
-module.exports = { buscarEnTienda, precalentar, estaListo, pesos };
+module.exports = { buscarEnTienda, precalentar, sirveLaBusqueda, pesos };
 
 /* Expuesto para probar la logica pura sin red ni base de datos. */
 module.exports._test = {

@@ -191,11 +191,11 @@ const HERRAMIENTA_CATALOGO = {
   },
 };
 
-/* La herramienta solo se ofrece si el catalogo ya esta cargado. Prometer una
-   busqueda que no se puede hacer es peor que no ofrecerla: si Shopify esta
-   bloqueando, el asistente se comporta como antes y nadie queda esperando. */
+/* Se ofrece mientras el catalogo pueda servir, aunque todavia este cargando:
+   si se la quitamos durante la carga, el prompt le sigue pidiendo mostrar
+   producto y termina diciendo "dejame busco" sin tener con que buscar. */
 const herramientasDe = cfg =>
-  (cfg.catalogo && cfg.catalogo.shopify && catalogo.estaListo(cfg.catalogo.shopify))
+  (cfg.catalogo && catalogo.sirveLaBusqueda(cfg.catalogo.shopify))
     ? [...HERRAMIENTAS, HERRAMIENTA_CATALOGO]
     : HERRAMIENTAS;
 
@@ -255,6 +255,13 @@ async function correrAsistente(cfg, historial) {
           const r = await catalogo.buscarEnTienda(cfg.catalogo, {
             texto: inp.que, talla: inp.talla, color: inp.color, precioMax: inp.precio_max,
           });
+          /* Sin esta linea no hay forma de saber, mirando el log, si el
+             asistente busco o solo dijo que iba a buscar. */
+          console.log(`[wa] busco "${inp.que}"` +
+            (inp.talla ? ` talla ${inp.talla}` : '') +
+            (inp.color ? ` ${inp.color}` : '') +
+            (inp.precio_max ? ` hasta ${inp.precio_max}` : '') +
+            ` -> ${r.items.length} resultado(s)`);
           /* Solo se envian fotos de la ultima busqueda que trajo algo: si el
              modelo busca otra vez y no encuentra, no mandamos fotos viejas. */
           productos = r.items;
