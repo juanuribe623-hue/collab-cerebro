@@ -340,13 +340,18 @@ async function enviarImagen(telefono, url, pie) {
 }
 
 /* Pie de foto: lo unico donde el cliente ve precio y link. El texto del
-   asistente no los repite, para que el mensaje no quede como un catalogo. */
+   asistente no los repite, para que el mensaje no quede como un catalogo.
+   La sede va ANTES del link y a proposito. En esta casa la tienda convierte
+   73% y la web 0,04%, asi que un pie que solo lleva al carrito empuja a la
+   gente al peor canal. Lo que vende es "ven a medirtelo". */
 function pieDeFoto(p) {
   const tallas = (p.tallas || []).filter(t => t && t !== 'unica');
+  const sedes  = p.sedes || [];
   return [
     `*${p.titulo}*`,
     p.marca,
-    catalogo.pesos(p.precio) + (tallas.length ? `  ·  tallas ${tallas.join(', ')}` : ''),
+    catalogo.pesos(p.precio) + (tallas.length ? `  ·  talla ${tallas.join(', ')}` : ''),
+    sedes.length ? `Para medirtelo: ${sedes.join(' o ')}` : 'Solo con envio',
     p.url,
   ].filter(Boolean).join('\n');
 }

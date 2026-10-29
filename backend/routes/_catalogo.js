@@ -317,7 +317,16 @@ async function cargarPorAPI(dominio, token) {
  * Si falla, se devuelve vacio y el asistente sigue sin el dato. Saber en que
  * sede esta es un lujo, no un requisito.
  */
-async function sedesDe(dominio, token, ids) {
+/* Shopify guarda las sedes como "Precis 109", que es como las nombro quien
+   las cargo. Al cliente se le dice "Calle 109". El mapa va en la
+   configuracion de la empresa, y si no hay, se usa el nombre tal cual. */
+function nombreSede(nombre, alias) {
+  if (!alias) return nombre;
+  const clave = Object.keys(alias).find(k => sinTildes(k) === sinTildes(nombre));
+  return clave ? alias[clave] : nombre;
+}
+
+async function sedesDe(dominio, token, ids, alias) {
   if (!token || !ids.length) return new Map();
   try {
     const d = await gql(dominio, token, Q_SEDES, { ids: ids.slice(0, 10) });
@@ -326,7 +335,7 @@ async function sedesDe(dominio, token, ids) {
       if (!n || !n.id || !n.storeAvailability) continue;
       mapa.set(n.id, (n.storeAvailability.nodes || [])
         .filter(s => s.available && s.location && s.location.name)
-        .map(s => limpio(s.location.name, 40)));
+        .map(s => nombreSede(limpio(s.location.name, 40), alias)));
     }
     return mapa;
   } catch (e) {
@@ -569,20 +578,28 @@ function paraElModelo(items) {
     const tallas = it.tallas.join(', ');
     return `${i + 1}. ${it.titulo} | ${it.marca} | ${pesos(it.precio)}` +
            (tallas ? ` | tallas ${tallas}` : '') +
-           (it.sedes && it.sedes.length ? ` | esta en: ${it.sedes.join(', ')}` : '');
+           (it.sedes && it.sedes.length
+             ? ` | SE PUEDE VER EN: ${it.sedes.join(' y ')}`
+             : ' | no esta en ninguna tienda, solo para envio');
   });
-  const haySedes = items.some(it => it.sedes && it.sedes.length);
+  const enTienda = items.filter(it => it.sedes && it.sedes.length);
   return [
     `Encontre ${items.length}:`,
     ...lineas,
     '',
-    'Las fotos de estos se le envian solas al cliente despues de tu mensaje, con nombre, precio y link.',
-    'Presentalos en una o dos lineas, sin repetir precios ni links, y pregunta cual le gusta.',
-    haySedes
-      ? 'Si el cliente pregunta donde verlo, dile en que sede esta, que es dato de Shopify.'
-      : 'No tienes el dato de en que sede esta cada pieza en esta busqueda.',
-    'Ojo: que aparezca disponible no es garantia. No prometas que esta,',
-    'di que lo confirmas antes de que venga. Y hay producto en tienda que no esta aqui.',
+    'Las fotos se le envian solas al cliente detras de tu mensaje, con nombre,',
+    'marca, precio, en que tienda esta y el link. No repitas nada de eso.',
+    '',
+    'LO QUE TIENES QUE LOGRAR CON ESTE MENSAJE: que la persona vaya a la tienda.',
+    enTienda.length
+      ? `Nombra la sede donde esta lo que le gusto (${[...new Set(enTienda.flatMap(i => i.sedes))].join(', ')}) ` +
+        'e invitala a pasar a medirselo. Pregunta cual sede le queda mejor. ' +
+        'Si varias piezas estan en la misma sede, dilo: es una razon mas para ir.'
+      : 'Ninguna de estas esta en tienda fisica, solo para envio. Aqui si ofrece el envio.',
+    '',
+    'Ojo: que aparezca disponible no es garantia, el sistema puede ir un paso',
+    'atras de la sala. No prometas que esta ni que se lo apartas: di que lo',
+    'confirmas. Y hay producto en las tiendas que no esta aqui.',
   ].join('\n');
 }
 
@@ -630,7 +647,7 @@ async function buscarEnTienda(cfgCatalogo, filtros) {
   const idsMostrados = crudos
     .map(({ sirven }) => sirven.slice().sort((a, b) => a.precio - b.precio)[0])
     .map(v => v && v.id).filter(Boolean);
-  const sedes = await sedesDe(dominio, token, idsMostrados);
+  const sedes = await sedesDe(dominio, token, idsMostrados, cfgCatalogo.sedes);
 
   const items = crudos.map(({ p, sirven }) => {
     const barata = sirven.slice().sort((a, b) => a.precio - b.precio)[0];
