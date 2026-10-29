@@ -2,3 +2,8 @@ node_modules/
 .env
 *.log
 .DS_Store
+
+# Aplicaciones de macOS. Una copia de claude.app se colo en backend/db/ y
+# metio un binario de 220 MB en un commit: GitHub rechaza archivos de mas de
+# 100 MB, asi que el push dejo de funcionar hasta que se limpio la historia.
+*.app/
