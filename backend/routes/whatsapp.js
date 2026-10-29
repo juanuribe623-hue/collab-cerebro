@@ -21,6 +21,7 @@
  */
 const router   = require('express').Router();
 const supabase = require('./_supabase');
+const catalogo = require('./_catalogo');
 const { requireAuth } = require('./_auth');
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
@@ -36,6 +37,7 @@ const PROMPT_BASE = `Eres el asistente de atencion al cliente de una tienda. Ati
 
 REGLAS QUE NO PUEDES ROMPER:
 - Nunca confirmes disponibilidad, tallas, colores ni precios que no te hayan dado explicitamente en el contexto o en el resultado de una herramienta. Si no lo tienes, no lo inventes: usa la herramienta pasar_a_humano.
+- Si tienes la herramienta buscar_producto y el cliente te dice que busca algo, usala antes de pensar en pasar la conversacion a una persona. Mostrar es mejor que prometer que alguien mostrara.
 - Nunca prometas descuentos, plazos de entrega ni excepciones.
 - No mandes a la persona a otro numero ni a otro canal. La atienden por aqui mismo.
 - Si la persona pide hablar con alguien del equipo, usa pasar_a_humano de inmediato, sin insistir.
@@ -51,6 +53,7 @@ async function leerConfig(companyId) {
     company_id: companyId, activo: true, nombre_bot: 'Asistente',
     nombre_humano: 'nuestro equipo', system_prompt: null,
     base_conocimiento: null, horario: { modo: 'siempre' }, silencio_min: 45,
+    catalogo: null,
   };
 }
 
@@ -135,7 +138,37 @@ const HERRAMIENTAS = [
   },
 ];
 
-async function llamarClaude(system, messages) {
+/* Solo se le ofrece a las empresas que tienen catalogo configurado. Si no
+   existe la herramienta, el modelo no puede intentar usarla y caer en error. */
+const HERRAMIENTA_CATALOGO = {
+  name: 'buscar_producto',
+  description:
+    'Busca en el catalogo de la tienda online lo que esta disponible ahora. ' +
+    'Usala apenas el cliente diga que busca algo (una prenda, un accesorio, un regalo), ' +
+    'antes de pensar en pasar la conversacion a una persona. ' +
+    'No necesitas saber talla ni presupuesto para buscar: busca con lo que tengas y ' +
+    'afina despues con lo que el cliente te responda.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      que:        { type: 'string', description: 'Lo que busca, en las palabras del cliente: "vestido de fiesta", "sets urbanos", "zapatos negros", "aretes"' },
+      talla:      { type: 'string', description: 'Solo si la dijo: S, M, L, XS, 38, unica' },
+      color:      { type: 'string', description: 'Solo si lo dijo' },
+      precio_max: { type: 'number', description: 'Presupuesto maximo en pesos, solo si lo dijo' },
+    },
+    required: ['que'],
+  },
+};
+
+/* La herramienta solo se ofrece si el catalogo ya esta cargado. Prometer una
+   busqueda que no se puede hacer es peor que no ofrecerla: si Shopify esta
+   bloqueando, el asistente se comporta como antes y nadie queda esperando. */
+const herramientasDe = cfg =>
+  (cfg.catalogo && cfg.catalogo.shopify && catalogo.estaListo(cfg.catalogo.shopify))
+    ? [...HERRAMIENTAS, HERRAMIENTA_CATALOGO]
+    : HERRAMIENTAS;
+
+async function llamarClaude(system, messages, herramientas = HERRAMIENTAS) {
   const key = process.env.CLAUDE_API_KEY;
   if (!key) throw new Error('CLAUDE_API_KEY no configurada');
   const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -149,7 +182,7 @@ async function llamarClaude(system, messages) {
       model: 'claude-sonnet-4-6',
       max_tokens: 700,
       system,
-      tools: HERRAMIENTAS,
+      tools: herramientas,
       messages,
     }),
   });
@@ -167,11 +200,12 @@ async function correrAsistente(cfg, historial) {
     content: String(m.texto || '').slice(0, 1500) || '(sin texto)',
   }));
   if (!messages.length || messages[messages.length - 1].role !== 'user') {
-    return { texto: null, escalar: null, nombre: null };
+    return { texto: null, escalar: null, nombre: null, productos: [] };
   }
 
-  let escalar = null, nombre = null;
-  let resp = await llamarClaude(system, messages);
+  const herramientas = herramientasDe(cfg);
+  let escalar = null, nombre = null, productos = [];
+  let resp = await llamarClaude(system, messages, herramientas);
 
   for (let i = 0; i < 3 && resp.stop_reason === 'tool_use'; i++) {
     const results = [];
@@ -184,6 +218,21 @@ async function correrAsistente(cfg, historial) {
       } else if (b.name === 'guardar_contacto') {
         nombre = (b.input || {}).nombre || null;
         out = 'Nombre guardado.';
+      } else if (b.name === 'buscar_producto') {
+        const inp = b.input || {};
+        try {
+          const r = await catalogo.buscarEnTienda(cfg.catalogo, {
+            texto: inp.que, talla: inp.talla, color: inp.color, precioMax: inp.precio_max,
+          });
+          /* Solo se envian fotos de la ultima busqueda que trajo algo: si el
+             modelo busca otra vez y no encuentra, no mandamos fotos viejas. */
+          productos = r.items;
+          out = r.texto;
+        } catch (e) {
+          console.error('[wa catalogo]', e.message);
+          productos = [];
+          out = 'El catalogo no respondio. No inventes producto: ofrecele que una persona del equipo le muestre opciones.';
+        }
       } else {
         out = 'Herramienta desconocida';
       }
@@ -191,12 +240,12 @@ async function correrAsistente(cfg, historial) {
     }
     messages.push({ role: 'assistant', content: resp.content });
     messages.push({ role: 'user', content: results });
-    resp = await llamarClaude(system, messages);
+    resp = await llamarClaude(system, messages, herramientas);
   }
 
   const texto = (resp.content || [])
     .filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
-  return { texto: texto || null, escalar, nombre };
+  return { texto: texto || null, escalar, nombre, productos };
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,6 +275,42 @@ async function enviarWhatsApp(telefono, texto) {
     return { ok: false, error };
   }
   return { ok: true };
+}
+
+/* Meta descarga la imagen desde el link, asi que tiene que ser publica y
+   https. Las de Shopify lo son. Si una falla no se cae la conversacion:
+   el mensaje de texto ya salio. */
+async function enviarImagen(telefono, url, pie) {
+  if (modoPrueba()) return { ok: true, simulado: true };
+  if (!/^https:\/\//i.test(String(url || ''))) return { ok: false, error: 'Imagen no valida' };
+  const r = await fetch(`${GRAPH}/${process.env.WHATSAPP_PHONE_ID}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp', to: telefono,
+      type: 'image', image: { link: url, caption: String(pie).slice(0, 1000) },
+    }),
+  });
+  if (!r.ok) {
+    console.error('[wa] foto fallo', r.status, (await r.text().catch(() => '')).slice(0, 200));
+    return { ok: false, error: 'No se pudo enviar la foto.' };
+  }
+  return { ok: true };
+}
+
+/* Pie de foto: lo unico donde el cliente ve precio y link. El texto del
+   asistente no los repite, para que el mensaje no quede como un catalogo. */
+function pieDeFoto(p) {
+  const tallas = (p.tallas || []).filter(t => t && t !== 'unica');
+  return [
+    `*${p.titulo}*`,
+    p.marca,
+    catalogo.pesos(p.precio) + (tallas.length ? `  ·  tallas ${tallas.join(', ')}` : ''),
+    p.url,
+  ].filter(Boolean).join('\n');
 }
 
 /* ------------------------------------------------------------------ */
@@ -315,6 +400,18 @@ async function procesarEntrante(companyId, telefono, contenido, nombreSugerido) 
   if (!env.ok) return { chat_id: chat.id, respuesta: null, motivo: env.error };
 
   await agregarMensaje(chat, 'bot', texto);
+
+  /* Las fotos van detras del mensaje, no en vez de el: primero el asistente
+     dice algo, despues llega el producto. Si escalo, no se mandan: la
+     persona que retoma decide que mostrar. */
+  if (!salida.escalar && salida.productos && salida.productos.length) {
+    for (const p of salida.productos.slice(0, 3)) {
+      if (!p.imagen) continue;
+      const pie = pieDeFoto(p);
+      const e = await enviarImagen(chat.telefono, p.imagen, pie);
+      if (e.ok) await agregarMensaje(chat, 'bot', { tipo: 'image', texto: pie });
+    }
+  }
 
   const patch = { ultimo_ts: new Date().toISOString() };
   if (salida.nombre && !chat.nombre) patch.nombre = salida.nombre;
@@ -494,6 +591,12 @@ router.post('/chats/:id/tomar', async (req, res) => {
             const env = await enviarWhatsApp(chat.telefono, texto);
             if (env.ok) {
               await agregarMensaje({ id: chat.id, company_id: chat.company_id }, 'bot', texto);
+              for (const p of (salida.productos || []).slice(0, 3)) {
+                if (!p.imagen) continue;
+                const pie = pieDeFoto(p);
+                const e = await enviarImagen(chat.telefono, p.imagen, pie);
+                if (e.ok) await agregarMensaje({ id: chat.id, company_id: chat.company_id }, 'bot', { tipo: 'image', texto: pie });
+              }
               await supabase.from('wa_chats')
                 .update({ ultimo_ts: new Date().toISOString() }).eq('id', chat.id);
             }
@@ -533,12 +636,32 @@ router.put('/config', async (req, res) => {
     base_conocimiento: b.base_conocimiento || null,
     horario:           b.horario || { modo: 'siempre' },
     silencio_min:      Number(b.silencio_min) || 45,
+    catalogo:          b.catalogo || null,
     updated_at:        new Date().toISOString(),
   };
   const { error } = await supabase.from('wa_config').upsert(fila, { onConflict: 'company_id' });
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
+
+/* Al arrancar se deja el catalogo cargado para las empresas que lo tengan.
+   Sin esto, el primer cliente que pregunte por producto espera los diez
+   segundos que toma bajar el catalogo entero. Si falla no pasa nada: se
+   carga sola en la primera busqueda. */
+setTimeout(async () => {
+  try {
+    const { data } = await supabase.from('wa_config').select('catalogo').not('catalogo', 'is', null);
+    const vistos = new Set();
+    for (const fila of data || []) {
+      const c = fila.catalogo;
+      if (!c || !c.shopify || vistos.has(c.shopify)) continue;
+      vistos.add(c.shopify);
+      await catalogo.precalentar(c);
+    }
+  } catch (e) {
+    console.error('[catalogo] precalentado:', e.message);
+  }
+}, 3000);
 
 module.exports = router;
 module.exports.procesarEntrante = procesarEntrante;
