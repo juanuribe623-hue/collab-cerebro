@@ -53,7 +53,7 @@ async function leerConfig(companyId) {
     company_id: companyId, activo: true, nombre_bot: 'Asistente',
     nombre_humano: 'nuestro equipo', system_prompt: null,
     base_conocimiento: null, horario: { modo: 'siempre' }, silencio_min: 45,
-    catalogo: null,
+    escalamiento_min: 90, catalogo: null,
   };
 }
 
@@ -108,6 +108,37 @@ function botDebeResponder(horario, now = new Date()) {
   const ini = Number.isFinite(h.inicio) ? h.inicio : 9;
   const fin = Number.isFinite(h.fin)    ? h.fin    : 19;
   return hora < ini || hora >= fin;
+}
+
+/**
+ * Por que el asistente no contesta. Devuelve null si si debe contestar.
+ *
+ * Son cuatro razones y solo una es permanente. La diferencia importa:
+ *
+ *   tomado         una persona se apropio del chat desde el panel. Dura hasta
+ *                  que esa persona lo suelte, y asi debe ser.
+ *   silencio_hasta una persona acaba de escribir. Se vence solo.
+ *   escalado_hasta el asistente pidio ayuda. Se vence solo.
+ *
+ * Esa ultima antes se guardaba en "tomado", y como "tomado" es permanente, el
+ * asistente quedaba mudo con ese cliente para siempre: el 29 de octubre dos
+ * personas del equipo escribieron a Pris y no les contesto nunca, por chats
+ * que el bot habia escalado semanas antes y nadie habia desmarcado.
+ *
+ * Se separa en hora para poder probarla sin base de datos y sin reloj real.
+ */
+function razonParaCallar(cfg, chat, ahora = new Date()) {
+  const vigente = t => Boolean(t && new Date(t) > ahora);
+  if (!cfg.activo)   return 'el asistente esta apagado';
+  if (chat.tomado)   return 'chat tomado por una persona';
+  if (vigente(chat.silencio_hasta)) return 'el bot esta en silencio porque escribio una persona';
+  if (vigente(chat.escalado_hasta)) {
+    const h = new Date(chat.escalado_hasta)
+      .toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit' });
+    return `escalado, el bot retoma a las ${h}`;
+  }
+  if (!botDebeResponder(cfg.horario, ahora)) return 'fuera del horario del bot';
+  return null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -378,10 +409,8 @@ async function procesarEntrante(companyId, telefono, contenido, nombreSugerido) 
     .update({ no_leido: true, ultimo_ts: new Date().toISOString() })
     .eq('id', chat.id);
 
-  const enSilencio = chat.silencio_hasta && new Date(chat.silencio_hasta) > new Date();
-  if (!cfg.activo || chat.tomado || enSilencio || !botDebeResponder(cfg.horario)) {
-    return { chat_id: chat.id, respuesta: null, motivo: chat.tomado ? 'chat tomado por una persona' : (enSilencio ? 'el bot esta en silencio' : 'fuera del horario del bot') };
-  }
+  const callar = razonParaCallar(cfg, chat);
+  if (callar) return { chat_id: chat.id, respuesta: null, motivo: callar };
 
   const historial = await historialDe(chat.id);
   const esPrimero = !historial.some(m => m.de === 'bot');
@@ -415,7 +444,15 @@ async function procesarEntrante(companyId, telefono, contenido, nombreSugerido) 
 
   const patch = { ultimo_ts: new Date().toISOString() };
   if (salida.nombre && !chat.nombre) patch.nombre = salida.nombre;
-  if (salida.escalar) { patch.tomado = true; patch.no_leido = true; }
+  if (salida.escalar) {
+    /* Se calla un rato para no hablar encima de quien llegue, pero no se
+       apropia del chat: "tomado" es de las personas. Si nadie atiende dentro
+       de la ventana, el asistente retoma. Un cliente esperando sin respuesta
+       es peor que un asistente que vuelve a contestar. */
+    const minutos = Number(cfg.escalamiento_min) > 0 ? Number(cfg.escalamiento_min) : 90;
+    patch.escalado_hasta = new Date(Date.now() + minutos * 60000).toISOString();
+    patch.no_leido = true;
+  }
   await supabase.from('wa_chats').update(patch).eq('id', chat.id);
 
   if (salida.escalar) {
@@ -509,6 +546,9 @@ router.get('/chats', async (req, res) => {
       return {
         id: c.id, telefono: c.telefono, nombre: c.nombre || '',
         tomado: c.tomado, no_leido: c.no_leido,
+        /* El asistente pidio ayuda y todavia nadie llego. Es distinto de
+           "tomado": esto se vence solo y hay que atenderlo ya. */
+        escalado: Boolean(c.escalado_hasta && new Date(c.escalado_hasta) > new Date()),
         ultimo: (u.texto || '').slice(0, 90), ultimo_de: u.de || '', ts: c.ultimo_ts,
       };
     }),
@@ -531,6 +571,8 @@ router.get('/chats/:id', async (req, res) => {
     chat: {
       id: chat.id, telefono: chat.telefono, nombre: chat.nombre || '',
       tomado: chat.tomado, silencio_hasta: chat.silencio_hasta,
+      escalado_hasta: chat.escalado_hasta,
+      escalado: Boolean(chat.escalado_hasta && new Date(chat.escalado_hasta) > new Date()),
     },
     mensajes: mensajes || [],
   });
@@ -550,11 +592,13 @@ router.post('/chats/:id/enviar', async (req, res) => {
 
   await agregarMensaje(chat, 'humano', texto, req.userId);
 
-  /* Si una persona escribe, el bot se calla un rato en esa conversacion. */
+  /* Si una persona escribe, el bot se calla un rato en esa conversacion.
+     Y si el chat venia escalado, ya llego quien tenia que llegar: se limpia
+     la marca para que no siga pintada de rojo en el panel. */
   const cfg = await leerConfig(req.companyId);
   const hasta = new Date(Date.now() + (cfg.silencio_min || 45) * 60000).toISOString();
   await supabase.from('wa_chats')
-    .update({ silencio_hasta: hasta, no_leido: false, ultimo_ts: new Date().toISOString() })
+    .update({ silencio_hasta: hasta, escalado_hasta: null, no_leido: false, ultimo_ts: new Date().toISOString() })
     .eq('id', chat.id);
 
   res.json({ ok: true, simulado: Boolean(env.simulado), silencio_hasta: hasta });
@@ -571,6 +615,7 @@ router.post('/chats/:id/tomar', async (req, res) => {
     tomado,
     tomado_por: tomado ? req.userId : null,
     silencio_hasta: null,   /* al tomar o al devolver, el reloj de silencio se reinicia */
+    escalado_hasta: null,   /* alguien se hizo cargo, o lo devolvio: la peticion de ayuda ya no aplica */
   }).eq('id', chat.id);
 
   res.json({ ok: true, tomado });
@@ -636,6 +681,7 @@ router.put('/config', async (req, res) => {
     base_conocimiento: b.base_conocimiento || null,
     horario:           b.horario || { modo: 'siempre' },
     silencio_min:      Number(b.silencio_min) || 45,
+    escalamiento_min:  Number(b.escalamiento_min) || 90,
     catalogo:          b.catalogo || null,
     updated_at:        new Date().toISOString(),
   };
@@ -661,10 +707,10 @@ setTimeout(async () => {
   } catch (e) {
     console.error('[catalogo] precalentado:', e.message);
   }
-}, 3000);
+}, 3000).unref();   /* que no sea esto lo que mantenga vivo al proceso */
 
 module.exports = router;
 module.exports.procesarEntrante = procesarEntrante;
 
 /* Expuesto solo para pruebas de la logica pura, sin base de datos. */
-module.exports._test = { botDebeResponder, conAvisoLegal, armarSystem, normTel };
+module.exports._test = { botDebeResponder, conAvisoLegal, armarSystem, normTel, razonParaCallar };

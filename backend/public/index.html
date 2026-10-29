@@ -209,6 +209,10 @@
   .wa-thread-tel{font-size:12px;color:var(--gray)}
   .wa-switch-wrap{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--slate);cursor:pointer}
   .wa-notice{background:#FCEFE7;color:var(--terra);font-size:12px;padding:8px 16px}
+  /* El asistente pidio ayuda y nadie ha llegado: tiene que saltar a la vista
+     mas que un chat tomado, porque este si tiene a alguien esperando. */
+  .wa-escalado{display:inline-block;margin-top:5px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:#9B3B2E;color:#fff}
+  .wa-notice-alerta{background:#9B3B2E;color:#fff}
   .wa-msgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:8px;background:var(--bg)}
   .wa-bubble-row{display:flex}
   .wa-bubble-row.out{justify-content:flex-end}
@@ -2424,7 +2428,7 @@ function renderListaWA(){
         <span class="wa-item-preview">${esc(preview)}</span>
         ${c.no_leido?'<span class="wa-dot"></span>':''}
       </div>
-      ${c.tomado?'<span class="wa-taken">Gabi</span>':''}
+      ${c.tomado?'<span class="wa-taken">Gabi</span>':(c.escalado?'<span class="wa-escalado">Pide ayuda</span>':'')}
     </div>`;
   }).join('');
 }
@@ -2482,7 +2486,11 @@ function renderHiloWA(){
         Atender yo
       </label>
     </div>
-    ${chat.tomado?'<div class="wa-notice">El asistente esta en silencio en esta conversacion.</div>':''}
+    ${chat.tomado
+      ? '<div class="wa-notice">El asistente esta en silencio en esta conversacion.</div>'
+      : (chat.escalado
+        ? `<div class="wa-notice wa-notice-alerta">El asistente pidio ayuda y esta esperando. Si nadie responde, retoma la conversacion a las ${esc(new Date(chat.escalado_hasta).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}))}.</div>`
+        : '')}
     <div class="wa-msgs" id="waMsgs">
       ${msgs.length ? msgs.map(waBurbuja).join('') : '<div class="empty">Todavia no hay mensajes.</div>'}
     </div>
