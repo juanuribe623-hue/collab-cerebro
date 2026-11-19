@@ -521,8 +521,14 @@ function buscar(productos, f) {
       if (precioMax && v.precio > precioMax) return false;
       if (precioMin && v.precio < precioMin) return false;
       if (!talla) return true;
-      /* La talla unica sirve para cualquier pedido de talla: un accesorio o
-         una prenda de talla unica le queda a quien pidio S. */
+      /* Tres casos distintos, y antes se trataban como uno solo:
+           v.talla === talla   calza, y lo sabemos
+           'unica'             calza: un accesorio le queda a quien pidio S
+           sin talla cargada   NO sabemos si calza
+         El tercero sigue entrando, porque en este catalogo hay prendas sin
+         talla en Shopify y esconderlas seria peor, pero entra MARCADO: antes
+         se mezclaba con los otros dos y el cliente que pedia XL recibia como
+         XL piezas de las que nadie habia verificado la talla. */
       return v.talla === talla || v.talla === 'unica' || !v.talla;
     });
     if (!sirven.length) continue;
@@ -542,13 +548,27 @@ function buscar(productos, f) {
     }
     if (claves.length && puntajeTexto === 0) continue;  /* pidio algo concreto y no se parece en nada */
 
+    /* Sabemos que esta pieza le sirve a quien pidio esa talla. Si no se pidio
+       talla, no hay nada que confirmar y todas cuentan como confirmadas. */
+    const tallaConfirmada = !talla ||
+      sirven.some(v => v.talla === talla || v.talla === 'unica');
+
     let puntaje = puntajeTexto;
     if (talla) {
       puntaje += sirven.some(v => v.talla === talla) ? 4 : 1;  /* exacta pesa mas que unica */
     }
     if (color && sirven.some(v => v.color && v.color.includes(color))) puntaje += 3;
 
-    resultados.push({ p, sirven, puntaje });
+    /* tallaConfirmada NO toca el puntaje, y eso es deliberado. El orden que ya
+       habia es correcto: con "vestidos talla XL" los textos empatan y el +4 de
+       la talla exacta hace ganar al que si es XL. Se probo castigar aqui a la
+       pieza de talla desconocida y el remedio salia peor: con "el kaftan
+       mendelli en XL" la pieza que el cliente nombro se caia debajo de
+       cualquier otro vestido que si fuera XL.
+       El problema real nunca fue el orden, era que estas piezas se mostraban
+       como si fueran de la talla pedida. Por eso la bandera solo viaja hasta
+       el texto del modelo y el pie de foto, para decir la verdad. */
+    resultados.push({ p, sirven, puntaje, tallaConfirmada });
   }
 
   /* A igual puntaje, lo mas nuevo primero: en moda eso es lo que vale. */
@@ -573,33 +593,46 @@ function linkDe(dominio, handle, utm) {
  * Lo que el asistente ve. Texto corto y plano: el modelo no necesita el JSON
  * completo y cada campo de mas es una oportunidad de que invente.
  */
-function paraElModelo(items) {
+function paraElModelo(items, tallaPedida) {
   const lineas = items.map((it, i) => {
     const tallas = it.tallas.join(', ');
     return `${i + 1}. ${it.titulo} | ${it.marca} | ${pesos(it.precio)}` +
-           (tallas ? ` | tallas ${tallas}` : '') +
+           /* Solo se grita cuando el cliente pregunto por talla. Un arete no
+              tiene talla y decirlo en cada busqueda es ruido que termina en
+              una respuesta rara. */
+           (tallas ? ` | tallas ${tallas}` : (tallaPedida ? ' | TALLA SIN CARGAR' : '')) +
            (it.sedes && it.sedes.length
              ? ` | SE PUEDE VER EN: ${it.sedes.join(' y ')}`
-             : ' | no esta en ninguna tienda, solo para envio');
+             : ' | no está en ninguna tienda, solo para envío');
   });
   const enTienda = items.filter(it => it.sedes && it.sedes.length);
+  const sinTalla = tallaPedida ? items.filter(it => !it.tallaConfirmada) : [];
   return [
-    `Encontre ${items.length}:`,
+    `Encontré ${items.length}:`,
     ...lineas,
     '',
-    'Las fotos se le envian solas al cliente detras de tu mensaje, con nombre,',
-    'marca, precio, en que tienda esta y el link. No repitas nada de eso.',
+    'Las fotos se le envían solas al cliente detrás de tu mensaje, con nombre,',
+    'marca, precio, en qué tienda está y el link. No repitas nada de eso.',
     '',
+    /* Sin esta advertencia el modelo daba por hecho que todo lo devuelto era
+       de la talla pedida, y terminaba ofreciendo como XL piezas de las que no
+       sabemos la talla. */
+    ...(sinTalla.length
+      ? [`OJO CON LA TALLA: de ${sinTalla.length === items.length ? 'estas piezas' : sinTalla.length === 1 ? 'una de estas piezas' : `${sinTalla.length} de estas piezas`} ` +
+         `no tenemos la talla cargada en el sistema. NO digas que son talla ${tallaPedida}. ` +
+         'Dile que se la confirmas, o invítala a la tienda a medírsela, que es mejor.',
+         '']
+      : []),
     'LO QUE TIENES QUE LOGRAR CON ESTE MENSAJE: que la persona vaya a la tienda.',
     enTienda.length
-      ? `Nombra la sede donde esta lo que le gusto (${[...new Set(enTienda.flatMap(i => i.sedes))].join(', ')}) ` +
-        'e invitala a pasar a medirselo. Pregunta cual sede le queda mejor. ' +
-        'Si varias piezas estan en la misma sede, dilo: es una razon mas para ir.'
-      : 'Ninguna de estas esta en tienda fisica, solo para envio. Aqui si ofrece el envio.',
+      ? `Nombra la sede donde está lo que le gustó (${[...new Set(enTienda.flatMap(i => i.sedes))].join(', ')}) ` +
+        'e invítala a pasar a medírselo. Pregúntale cuál sede le queda mejor. ' +
+        'Si varias piezas están en la misma sede, dilo: es una razón más para ir.'
+      : 'Ninguna de estas está en tienda física, solo para envío. Aquí sí ofrece el envío.',
     '',
-    'Ojo: que aparezca disponible no es garantia, el sistema puede ir un paso',
-    'atras de la sala. No prometas que esta ni que se lo apartas: di que lo',
-    'confirmas. Y hay producto en las tiendas que no esta aqui.',
+    'Ojo: que aparezca disponible no es garantía, el sistema puede ir un paso',
+    'atrás de la sala. No prometas que está ni que se lo apartas: di que lo',
+    'confirmas. Y hay producto en las tiendas que no está aquí.',
   ].join('\n');
 }
 
@@ -623,9 +656,9 @@ async function buscarEnTienda(cfgCatalogo, filtros) {
     console.warn(`[catalogo] ${dominio} todavia cargando, el cliente no espera mas`);
     return {
       items: [],
-      texto: 'El catalogo todavia se esta cargando, no alcance a traer las opciones. ' +
-             'No digas que vas a buscar ni que ya buscaste. Preguntale algo util ' +
-             'mientras tanto, como el color o la ocasion, y con eso vuelves a buscar ' +
+      texto: 'El catálogo todavía se está cargando, no alcancé a traer las opciones. ' +
+             'No digas que vas a buscar ni que ya buscaste. Pregúntale algo útil ' +
+             'mientras tanto, como el color o la ocasión, y con eso vuelves a buscar ' +
              'en tu siguiente mensaje.',
     };
   }
@@ -635,9 +668,9 @@ async function buscarEnTienda(cfgCatalogo, filtros) {
   if (!crudos.length) {
     return {
       items: [],
-      texto: 'No hay nada con esas caracteristicas. Eso no quiere decir que no ' +
-             'haya en la tienda: no todo el producto de sala esta cargado. ' +
-             'Ofrecele buscar algo parecido, o pasa la conversacion a una ' +
+      texto: 'No hay nada con esas características. Eso no quiere decir que no ' +
+             'haya en la tienda: no todo el producto de sala está cargado. ' +
+             'Ofrécele buscar algo parecido, o pasa la conversación a una ' +
              'persona para que revise en sala.',
     };
   }
@@ -649,20 +682,23 @@ async function buscarEnTienda(cfgCatalogo, filtros) {
     .map(v => v && v.id).filter(Boolean);
   const sedes = await sedesDe(dominio, token, idsMostrados, cfgCatalogo.sedes);
 
-  const items = crudos.map(({ p, sirven }) => {
+  const items = crudos.map(({ p, sirven, tallaConfirmada }) => {
     const barata = sirven.slice().sort((a, b) => a.precio - b.precio)[0];
     return {
       titulo: p.titulo,
       marca:  p.marca,
       precio: barata.precio,
       tallas: [...new Set(sirven.map(v => v.talla).filter(Boolean))],
+      /* Viaja hasta el pie de foto: una pieza sin talla cargada no se puede
+         anunciar como si fuera de la talla que pidio el cliente. */
+      tallaConfirmada,
       sedes:  (barata.id && sedes.get(barata.id)) || [],
       imagen: p.imagen,
       url:    linkDe(dominio, p.handle, cfgCatalogo.utm),
     };
   });
 
-  return { items, texto: paraElModelo(items) };
+  return { items, texto: paraElModelo(items, normTalla(filtros.talla)) };
 }
 
 module.exports = { buscarEnTienda, precalentar, sirveLaBusqueda, pesos };
@@ -670,5 +706,5 @@ module.exports = { buscarEnTienda, precalentar, sirveLaBusqueda, pesos };
 /* Expuesto para probar la logica pura sin red ni base de datos. */
 module.exports._test = {
   normalizar, normalizarGQL, buscar, normTalla, indiceOpcion,
-  dominioValido, tokenDe, limpio, palabras,
+  dominioValido, tokenDe, limpio, palabras, paraElModelo,
 };

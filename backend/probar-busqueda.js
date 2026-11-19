@@ -1,5 +1,5 @@
 const { _test } = require('./routes/_catalogo');
-const { normalizar, normalizarGQL, buscar, normTalla, indiceOpcion, dominioValido, tokenDe, limpio } = _test;
+const { normalizar, normalizarGQL, buscar, normTalla, indiceOpcion, dominioValido, tokenDe, limpio, paraElModelo } = _test;
 
 let fallos = 0;
 const ok = (c, msg) => { if (!c) { console.log('  FALLA  ' + msg); fallos++; } else console.log('  ok     ' + msg); };
@@ -41,6 +41,67 @@ ok(b({texto:'aretes', talla:'S'})[0] === 'aretes-cat', 'talla unica sirve para q
 ok(b({texto:'patineta electrica'}).length === 0, 'lo que no existe no se inventa');
 ok(b({texto:'vestido', precioMax:400000}).length === 0, 'el presupuesto excluye de verdad');
 ok(b({texto:'vestido', precioMax:600000})[0] === 'vestido-fiesta', 'dentro del presupuesto si entra');
+
+/* El 19 de noviembre de 2026 un cliente pregunto por vestidos talla XL y Pris
+   le mando dos kaftanes de los que no tenemos la talla cargada, sin decirlo.
+   En Shopify esas piezas no traen opcion de Talla, y entraban al filtro de
+   talla como si calzaran. */
+console.log('\nTallas que no sabemos');
+const conYSinTalla = [
+  { handle:'kaftan-mendelli', title:'VESTIDO KAFTAN MENDELLI', vendor:'Manuela Cabrales',
+    tags:['vestidos','kaftan','mendelli'], published_at:'2026-11-01', images:[{src:'https://x/k.jpg'}],
+    options:[{name:'Color'}],                        /* sin Talla: el caso real */
+    variants:[ {option1:'rojo',price:'400000.00',available:true} ] },
+  { handle:'kaftan-aureo', title:'VESTIDO KAFTAN AUREO', vendor:'Bianco',
+    tags:['vestidos','kaftan'], published_at:'2026-10-01', images:[{src:'https://x/a.jpg'}],
+    options:[{name:'Color'},{name:'Talla'}],
+    variants:[ {option1:'negro',option2:'xl',price:'620000.00',available:true} ] },
+].map(normalizar);
+
+ok(conYSinTalla[0].disponibles[0].talla === '', 'una pieza sin opcion de Talla queda con talla vacia');
+
+const xl = buscar(conYSinTalla, {texto:'vestidos', talla:'XL'});
+ok(xl.length === 2, 'la pieza sin talla no desaparece: en esta casa el catalogo viene incompleto');
+ok(xl[0].p.handle === 'kaftan-aureo', 'pregunta generica por talla: primero el que si es XL');
+ok(xl[0].tallaConfirmada === true,  'el XL de verdad va marcado como confirmado');
+ok(xl[1].tallaConfirmada === false, 'la pieza sin talla va marcada, para no anunciarla como XL');
+
+/* Y el caso contrario, que es por el que no se castiga el puntaje: si el
+   cliente nombra la pieza, esa pieza manda aunque no sepamos su talla. */
+const nombrada = buscar(conYSinTalla, {texto:'vestido kaftan mendelli', talla:'XL'});
+ok(nombrada[0].p.handle === 'kaftan-mendelli',
+   'si el cliente nombra la pieza, esa va de primera aunque no tengamos su talla');
+
+ok(buscar(cat, {texto:'aretes', talla:'S'})[0].tallaConfirmada === true,
+   'la talla unica si cuenta como confirmada: a un arete le queda a cualquiera');
+ok(buscar(cat, {texto:'vestido de fiesta'})[0].tallaConfirmada === true,
+   'si nadie pidio talla, no hay nada que confirmar');
+
+/* Lo que el modelo lee. Es la pieza que de verdad evita que Pris anuncie como
+   XL algo que nadie verifico. */
+console.log('\nLo que se le dice al modelo sobre las tallas');
+const itemsMixtos = [
+  { titulo:'KAFTAN', marca:'Manuela Cabrales', precio:400000, tallas:[],
+    tallaConfirmada:false, sedes:['Calle 79'], url:'https://x' },
+  { titulo:'AUREO', marca:'Bianco', precio:620000, tallas:['xl'],
+    tallaConfirmada:true, sedes:['Cartagena'], url:'https://y' },
+];
+const conXL = paraElModelo(itemsMixtos, 'xl');
+ok(conXL.includes('OJO CON LA TALLA'), 'si hay piezas sin talla, se le advierte al modelo');
+ok(conXL.includes('NO digas que son talla xl'), 'se le dice exactamente que no puede afirmar');
+ok(conXL.includes('TALLA SIN CARGAR'), 'la pieza sin talla queda senalada en la lista');
+ok(conXL.includes('una de estas piezas'), 'cuenta bien cuando es una sola');
+
+const todasBien = paraElModelo([itemsMixtos[1]], 'xl');
+ok(!todasBien.includes('OJO CON LA TALLA'), 'si todas tienen talla, no se advierte nada');
+
+const sinPedir = paraElModelo(itemsMixtos, '');
+ok(!sinPedir.includes('OJO CON LA TALLA'), 'si nadie pidio talla, no se advierte');
+ok(!sinPedir.includes('TALLA SIN CARGAR'),
+   'un arete no tiene talla y decirlo en cada busqueda es ruido');
+
+ok(!/medirselo|cual sede|Encontre /.test(conXL),
+   'el texto del modelo va con tildes: el modelo copia este estilo');
 
 console.log('\nStorefront API (la forma que devuelve GraphQL)');
 const gql = normalizarGQL({

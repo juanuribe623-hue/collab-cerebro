@@ -33,18 +33,19 @@ const modoPrueba = () => !(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PH
 /* Configuracion del asistente                                        */
 /* ------------------------------------------------------------------ */
 
-const PROMPT_BASE = `Eres el asistente de atencion al cliente de una tienda. Atiendes por WhatsApp: mensajes cortos, calidos y directos, en espanol colombiano, de tu. Nada de lenguaje corporativo.
+const PROMPT_BASE = `Eres el asistente de atención al cliente de una tienda. Atiendes por WhatsApp: mensajes cortos, cálidos y directos, en español colombiano, de tú. Nada de lenguaje corporativo.
 
 REGLAS QUE NO PUEDES ROMPER:
-- Nunca confirmes disponibilidad, tallas, colores ni precios que no te hayan dado explicitamente en el contexto o en el resultado de una herramienta. Si no lo tienes, no lo inventes: usa la herramienta pasar_a_humano.
-- Si tienes la herramienta buscar_producto y el cliente te dice que busca algo, usala antes de pensar en pasar la conversacion a una persona. Mostrar es mejor que prometer que alguien mostrara.
+- Nunca confirmes disponibilidad, tallas, colores ni precios que no te hayan dado explícitamente en el contexto o en el resultado de una herramienta. Si no lo tienes, no lo inventes: usa la herramienta pasar_a_humano.
+- Si tienes la herramienta buscar_producto y el cliente te dice que busca algo, úsala antes de pensar en pasar la conversación a una persona. Mostrar es mejor que prometer que alguien mostrará.
+- Si el cliente te pide una talla, responde primero con lo que sí es de esa talla. Si algo no tiene la talla confirmada, dilo, no lo presentes como si lo fuera.
 - Nunca prometas descuentos, plazos de entrega ni excepciones.
-- No mandes a la persona a otro numero ni a otro canal. La atienden por aqui mismo.
+- No mandes a la persona a otro número ni a otro canal. La atienden por aquí mismo.
 - Si la persona pide hablar con alguien del equipo, usa pasar_a_humano de inmediato, sin insistir.
-- Si hay un reclamo, una garantia, un problema con un pago o un pedido que salio mal, usa pasar_a_humano. No intentes resolverlo tu.
-- Mensajes de maximo 4 lineas. Si necesitas mas, parte en dos ideas y pregunta antes de seguir.
+- Si hay un reclamo, una garantía, un problema con un pago o un pedido que salió mal, usa pasar_a_humano. No intentes resolverlo tú.
+- Mensajes de máximo 4 líneas. Si necesitas más, parte en dos ideas y pregunta antes de seguir.
 
-EN TU PRIMER MENSAJE de la conversacion es obligatorio por ley que digas que eres un asistente virtual con inteligencia artificial y que una persona del equipo retoma esta misma conversacion. Hazlo natural y breve, y no lo repitas despues.`;
+EN TU PRIMER MENSAJE de la conversación es obligatorio por ley que digas que eres un asistente virtual con inteligencia artificial y que una persona del equipo retoma esta misma conversación. Hazlo natural y breve, y no lo repitas después.`;
 
 async function leerConfig(companyId) {
   const { data } = await supabase
@@ -57,11 +58,51 @@ async function leerConfig(companyId) {
   };
 }
 
-function armarSystem(cfg) {
+/**
+ * De donde llego la persona, cuando WhatsApp nos lo dice.
+ *
+ * Meta manda un objeto "referral" en el primer mensaje de quien llega por un
+ * anuncio de clic a WhatsApp, con el titular que la persona vio. Quien llega
+ * asi ya vio una oferta concreta: preguntarle "en que te puedo ayudar" es
+ * hacerla repetir algo que ya hizo.
+ *
+ * Solo se describe el origen cuando lo sabemos. Si no viene referral puede ser
+ * que llego por la pagina, pero tambien que es el segundo mensaje de alguien
+ * que si venia de pauta, asi que afirmar "no viene de un anuncio" seria
+ * inventar.
+ */
+function textoDeOrigen(origen) {
+  if (!origen || !origen.tipo) return null;
+  const vio = [origen.titular, origen.cuerpo].filter(Boolean).join('. ');
+  const fuente = origen.tipo === 'ad'
+    ? 'hizo clic en un anuncio pago de la marca'
+    : 'escribió desde una publicación de la marca en redes';
+  return [
+    `DE DÓNDE VIENE ESTA PERSONA: ${fuente}. No te escribió en frío.`,
+    vio ? `Lo que vio antes de escribirte: "${vio}"` : null,
+    'Ya vio esa oferta y por eso está escribiendo. No la saludes como si llegara',
+    'de cero ni le preguntes en qué le puedes ayudar: retoma eso de una y sé',
+    'concreta. Lo que tienes que lograr es que pase por la tienda, no que se',
+    'ponga a explorar el catálogo.',
+  ].filter(Boolean).join('\n');
+}
+
+function armarSystem(cfg, origen) {
   const partes = [cfg.system_prompt || PROMPT_BASE];
   partes.push(`\nTe llamas ${cfg.nombre_bot}. La persona del equipo que retoma se llama ${cfg.nombre_humano}.`);
+
+  /* Va aparte del PROMPT_BASE a proposito: cada empresa puede traer su propio
+     system_prompt guardado y reemplazar el base entero. Esto aplica siempre.
+     La ortografia esta aqui porque el modelo copia el estilo de lo que le
+     mandamos, y una respuesta sin tildes se lee como automatica. */
+  partes.push('\nORTOGRAFÍA: escribe en español correcto, con tildes y con signos ' +
+    'de apertura (¿ ¡). Nunca uses guion largo (—) ni guion medio (–).');
+
+  const deDonde = textoDeOrigen(origen);
+  if (deDonde) partes.push('\n' + deDonde);
+
   if (cfg.base_conocimiento) {
-    partes.push(`\nBASE DE CONOCIMIENTO (respuestas aprobadas por el cliente, usalas como fuente de verdad):\n${cfg.base_conocimiento}`);
+    partes.push(`\nBASE DE CONOCIMIENTO (respuestas aprobadas por el cliente, úsalas como fuente de verdad):\n${cfg.base_conocimiento}`);
   }
   return partes.join('\n');
 }
@@ -77,7 +118,7 @@ function conAvisoLegal(esPrimero, texto, cfg) {
   if (!faltaIA && !faltaHumano) return texto;
   const extra = [];
   if (faltaIA)     extra.push(`Te escribe ${cfg.nombre_bot}, asistente virtual con inteligencia artificial.`);
-  if (faltaHumano) extra.push(`${cfg.nombre_humano} retoma esta conversacion en horario de atencion.`);
+  if (faltaHumano) extra.push(`${cfg.nombre_humano} retoma esta conversación en horario de atención.`);
   return texto + '\n\n' + extra.join(' ');
 }
 
@@ -148,11 +189,11 @@ function razonParaCallar(cfg, chat, ahora = new Date()) {
 const HERRAMIENTAS = [
   {
     name: 'pasar_a_humano',
-    description: 'Pasa la conversacion a una persona del equipo. Usala cuando el cliente lo pida, cuando haya un reclamo o garantia, cuando haya un problema con un pago o un pedido, o cuando necesites confirmar disponibilidad, talla o precio real que no tengas.',
+    description: 'Pasa la conversación a una persona del equipo. Úsala cuando el cliente lo pida, cuando haya un reclamo o garantía, cuando haya un problema con un pago o un pedido, o cuando necesites confirmar disponibilidad, talla o precio real que no tengas.',
     input_schema: {
       type: 'object',
       properties: {
-        motivo: { type: 'string', description: 'Por que se escala, en una frase' },
+        motivo: { type: 'string', description: 'Por qué se escala, en una frase' },
         resumen: { type: 'string', description: 'Resumen de lo que el cliente necesita, para que la persona no tenga que leer todo' },
       },
       required: ['motivo'],
@@ -160,7 +201,7 @@ const HERRAMIENTAS = [
   },
   {
     name: 'guardar_contacto',
-    description: 'Guarda el nombre del cliente cuando te lo diga, para poder saludarlo por su nombre despues.',
+    description: 'Guarda el nombre del cliente cuando te lo diga, para poder saludarlo por su nombre después.',
     input_schema: {
       type: 'object',
       properties: { nombre: { type: 'string' } },
@@ -174,11 +215,13 @@ const HERRAMIENTAS = [
 const HERRAMIENTA_CATALOGO = {
   name: 'buscar_producto',
   description:
-    'Busca en el catalogo de la tienda online lo que esta disponible ahora. ' +
-    'Usala apenas el cliente diga que busca algo (una prenda, un accesorio, un regalo), ' +
-    'antes de pensar en pasar la conversacion a una persona. ' +
+    'Busca en el catálogo de la tienda online lo que está disponible ahora. ' +
+    'Úsala apenas el cliente diga que busca algo (una prenda, un accesorio, un regalo), ' +
+    'antes de pensar en pasar la conversación a una persona. ' +
     'No necesitas saber talla ni presupuesto para buscar: busca con lo que tengas y ' +
-    'afina despues con lo que el cliente te responda.',
+    'afina después con lo que el cliente te responda. ' +
+    'Si el cliente dijo una talla, pásala en el campo talla: es la única forma de ' +
+    'que la búsqueda priorice lo que de verdad le sirve.',
   input_schema: {
     type: 'object',
     properties: {
@@ -224,8 +267,8 @@ async function llamarClaude(system, messages, herramientas = HERRAMIENTAS) {
 /**
  * Corre el cerebro sobre el historial. Devuelve el texto y si pidio escalar.
  */
-async function correrAsistente(cfg, historial) {
-  const system = armarSystem(cfg);
+async function correrAsistente(cfg, historial, origen) {
+  const system = armarSystem(cfg, origen);
   const messages = historial.slice(-MAX_TURNOS).map(m => ({
     role: m.de === 'cliente' ? 'user' : 'assistant',
     content: String(m.texto || '').slice(0, 1500) || '(sin texto)',
@@ -245,7 +288,7 @@ async function correrAsistente(cfg, historial) {
       let out = 'ok';
       if (b.name === 'pasar_a_humano') {
         escalar = b.input || {};
-        out = 'Listo, la conversacion queda marcada para que la retome una persona. Despidete con calma y dile que en un momento le responden por aqui mismo.';
+        out = 'Listo, la conversación queda marcada para que la retome una persona. Despídete con calma y dile que en un momento le responden por aquí mismo.';
       } else if (b.name === 'guardar_contacto') {
         nombre = (b.input || {}).nombre || null;
         out = 'Nombre guardado.';
@@ -269,7 +312,7 @@ async function correrAsistente(cfg, historial) {
         } catch (e) {
           console.error('[wa catalogo]', e.message);
           productos = [];
-          out = 'El catalogo no respondio. No inventes producto: ofrecele que una persona del equipo le muestre opciones.';
+          out = 'El catálogo no respondió. No inventes producto: ofrécele que una persona del equipo le muestre opciones.';
         }
       } else {
         out = 'Herramienta desconocida';
@@ -347,11 +390,17 @@ async function enviarImagen(telefono, url, pie) {
 function pieDeFoto(p) {
   const tallas = (p.tallas || []).filter(t => t && t !== 'unica');
   const sedes  = p.sedes || [];
+  /* Cuando el cliente pidio una talla y de esta pieza no la tenemos cargada,
+     el pie lo dice. Callarlo hacia que la foto pareciera confirmar una talla
+     que nadie verifico, justo lo contrario de lo que pide el prompt. */
+  const lineaTalla = tallas.length
+    ? `  ·  talla ${tallas.join(', ')}`
+    : (p.tallaConfirmada === false ? '  ·  talla por confirmar' : '');
   return [
     `*${p.titulo}*`,
     p.marca,
-    catalogo.pesos(p.precio) + (tallas.length ? `  ·  talla ${tallas.join(', ')}` : ''),
-    sedes.length ? `Para medirtelo: ${sedes.join(' o ')}` : 'Solo con envio',
+    catalogo.pesos(p.precio) + lineaTalla,
+    sedes.length ? `Para medírtelo: ${sedes.join(' o ')}` : 'Solo con envío',
     p.url,
   ].filter(Boolean).join('\n');
 }
@@ -407,7 +456,7 @@ async function historialDe(chatId) {
  * El corazon: procesa un mensaje entrante del cliente y decide si el bot contesta.
  * Lo usan por igual el webhook real y el simulador de pruebas.
  */
-async function procesarEntrante(companyId, telefono, contenido, nombreSugerido) {
+async function procesarEntrante(companyId, telefono, contenido, nombreSugerido, origen) {
   const cfg  = await leerConfig(companyId);
   /* Una sola linea que responde las tres preguntas de siempre cuando el bot
      se queda callado: que config cargo (si dice "Asistente" es la empresa
@@ -425,11 +474,14 @@ async function procesarEntrante(companyId, telefono, contenido, nombreSugerido) 
   if (callar) return { chat_id: chat.id, respuesta: null, motivo: callar };
 
   const historial = await historialDe(chat.id);
-  const esPrimero = !historial.some(m => m.de === 'bot');
+  /* Las notas internas tambien se guardan con de='bot' y no las ve el cliente.
+     Si contaran como un mensaje del bot, una nota en el primer turno haria que
+     el aviso legal no se diera nunca. */
+  const esPrimero = !historial.some(m => m.de === 'bot' && m.tipo !== 'nota');
 
   let salida;
   try {
-    salida = await correrAsistente(cfg, historial);
+    salida = await correrAsistente(cfg, historial, origen);
   } catch (e) {
     console.error('[wa asistente]', e.message);
     return { chat_id: chat.id, respuesta: null, motivo: 'error del asistente: ' + e.message };
@@ -469,7 +521,7 @@ async function procesarEntrante(companyId, telefono, contenido, nombreSugerido) 
 
   if (salida.escalar) {
     await agregarMensaje(chat, 'bot', {
-      texto: `[El asistente paso esta conversacion a una persona. Motivo: ${salida.escalar.motivo}${salida.escalar.resumen ? '. ' + salida.escalar.resumen : ''}]`,
+      texto: `[El asistente pasó esta conversación a una persona. Motivo: ${salida.escalar.motivo}${salida.escalar.resumen ? '. ' + salida.escalar.resumen : ''}]`,
       tipo: 'nota',
     });
   }
@@ -480,6 +532,37 @@ async function procesarEntrante(companyId, telefono, contenido, nombreSugerido) 
 /* ------------------------------------------------------------------ */
 /* Webhook de Meta (publico, sin auth: lo llama Meta)                  */
 /* ------------------------------------------------------------------ */
+
+/* El titular del anuncio termina dentro del prompt del sistema, asi que se
+   trata como texto de afuera: sin saltos de linea ni caracteres de control, y
+   topado. source_url y ctwa_clid no se usan: no le aportan nada al mensaje y
+   no vale la pena meter una URL ajena al prompt. */
+const textoDeAnuncio = s => String(s || '')
+  .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, 160);
+
+/**
+ * Meta manda "referral" en el primer mensaje de quien llega por un anuncio de
+ * clic a WhatsApp, o desde una publicacion. Es la unica forma de distinguir a
+ * quien viene de pauta de quien llego por la pagina o ya tenia el numero.
+ * Solo llega una vez, en el mensaje que abre la conversacion.
+ */
+function origenDe(msg) {
+  const r = msg && msg.referral;
+  if (!r) return null;
+  const tipo = r.source_type === 'ad' ? 'ad'
+             : r.source_type === 'post' ? 'post'
+             : null;
+  if (!tipo) return null;
+  return {
+    tipo,
+    titular: textoDeAnuncio(r.headline),
+    cuerpo:  textoDeAnuncio(r.body),
+    anuncio: textoDeAnuncio(r.source_id),
+  };
+}
 
 router.get('/webhook', (req, res) => {
   const t = process.env.WHATSAPP_VERIFY_TOKEN;
@@ -510,8 +593,17 @@ router.post('/webhook', async (req, res) => {
 
     /* procesarEntrante devuelve un motivo cada vez que decide no contestar.
        Antes se descartaba y el bot se quedaba mudo sin dejar rastro. */
-    console.log('[wa] entra', msg.type, 'de', msg.from);
-    const r = await procesarEntrante(companyId, msg.from, cont, perfil);
+    /* Saber que conversaciones nacieron de un anuncio es justo lo que falta
+       para cerrar el circulo con la pauta: hoy se ven las conversaciones
+       iniciadas pero no de cual anuncio salieron. */
+    const origen = origenDe(msg);
+    console.log('[wa] entra', msg.type, 'de', msg.from +
+      (origen
+        ? ` | viene de ${origen.tipo === 'ad' ? 'PAUTA' : 'publicacion'}` +
+          (origen.anuncio ? ` ${origen.anuncio}` : '') +
+          (origen.titular ? ` "${origen.titular}"` : '')
+        : ''));
+    const r = await procesarEntrante(companyId, msg.from, cont, perfil, origen);
     if (r && r.respuesta) console.log('[wa] respondido ok, chat', r.chat_id);
     else console.log('[wa] SIN RESPUESTA:', (r && r.motivo) || 'sin motivo');
   } catch (e) {
@@ -725,4 +817,5 @@ module.exports = router;
 module.exports.procesarEntrante = procesarEntrante;
 
 /* Expuesto solo para pruebas de la logica pura, sin base de datos. */
-module.exports._test = { botDebeResponder, conAvisoLegal, armarSystem, normTel, razonParaCallar };
+module.exports._test = { botDebeResponder, conAvisoLegal, armarSystem, normTel, razonParaCallar,
+                         origenDe, textoDeOrigen, pieDeFoto, aFormatoWhatsApp };
