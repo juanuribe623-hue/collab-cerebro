@@ -87,9 +87,34 @@ function textoDeOrigen(origen) {
   ].filter(Boolean).join('\n');
 }
 
-function armarSystem(cfg, origen) {
+/**
+ * Que puede prometer el asistente segun la hora.
+ *
+ * Sin esto, a las once de la noche contestaba "en un momento te responde
+ * Gabi", que es mentira y es la forma mas rapida de quemar la confianza.
+ */
+function textoDeHorario(cfg, ahora = new Date()) {
+  if (!ventanasDe(cfg.horario)) return null;
+  const quien = cfg.nombre_humano || 'el equipo';
+  if (hayHumano(cfg.horario, ahora)) {
+    return `HORARIO: ${quien} está atendiendo en este momento. Si la conversación ` +
+           `necesita una persona, dile que en un momento le responde ${quien} por aquí mismo.`;
+  }
+  const cuando = proximaApertura(cfg.horario, ahora);
+  return `HORARIO: ${quien} NO está atendiendo ahora.` +
+    (cuando ? ` Vuelve ${cuando}.` : '') +
+    ` Si la conversación necesita una persona, NO digas "en un momento" ni "ya mismo":` +
+    (cuando ? ` dile que ${quien} le escribe ${cuando}.` : ' dile cuándo vuelve el horario de atención.') +
+    ` Mientras tanto tú sí puedes seguir ayudando con lo que sepas, y es mejor que lo hagas` +
+    ` a que la persona se quede esperando.`;
+}
+
+function armarSystem(cfg, origen, ahora = new Date()) {
   const partes = [cfg.system_prompt || PROMPT_BASE];
   partes.push(`\nTe llamas ${cfg.nombre_bot}. La persona del equipo que retoma se llama ${cfg.nombre_humano}.`);
+
+  const horario = textoDeHorario(cfg, ahora);
+  if (horario) partes.push('\n' + horario);
 
   /* Va aparte del PROMPT_BASE a proposito: cada empresa puede traer su propio
      system_prompt guardado y reemplazar el base entero. Esto aplica siempre.
@@ -122,10 +147,62 @@ function conAvisoLegal(esPrimero, texto, cfg) {
   return texto + '\n\n' + extra.join(' ');
 }
 
+/* Red de seguridad de las tildes, igual que la del guion largo de abajo: se
+   pide en el prompt, el modelo cumple casi siempre, y el "casi" se ve. El 19
+   de noviembre de 2026 contesto con todo bien tildado menos la primera palabra
+   del mensaje, "Encontre", que es justo la mas visible.
+   Solo entran casos donde la version sin tilde NO existe en espanol. Nada de
+   "mas", "si", "esta" ni "cual" sueltos: ahi la palabra sin tilde tambien es
+   correcta y corregirla romperia frases buenas ("tal cual", "el cual"). */
+const SIN_TILDE = [
+  [/\bencontre\b/gi,          'encontré'],
+  [/\basi\b/gi,               'así'],
+  [/\baqui\b/gi,              'aquí'],
+  [/\baca\b/gi,               'acá'],
+  [/\balli\b/gi,              'allí'],
+  [/\bestan\b/gi,             'están'],
+  [/\btambien\b/gi,           'también'],
+  [/\bademas\b/gi,            'además'],
+  [/\bmedir(te|se|me)(lo|la)\b/gi, 'medír$1$2'],
+  [/¿(\s*)cual\b/gi,          '¿$1cuál'],
+  [/¿(\s*)como\b/gi,          '¿$1cómo'],
+  [/¿(\s*)cuando\b/gi,        '¿$1cuándo'],
+  [/¿(\s*)donde\b/gi,         '¿$1dónde'],
+  [/¿(\s*)cuanto(s|a|as)?\b/gi, '¿$1cuánto$2'],
+];
+
+/* En espanol no hay ninguna palabra que termine en -cion, -sion o -xion sin
+   tilde. El plural si va sin ella ("informaciones"), por eso el \b del final. */
+const CIERRE_CION = /([a-záéíóúñ]{2,})(c|s|x)ion\b/gi;
+
+/* Sin esto "Encontre tres opciones" quedaba "encontré tres opciones": la frase
+   perdia la mayuscula inicial y el arreglo se notaba mas que el error. */
+function comoVenia(original, corregido) {
+  const i = original.search(/[a-zñ]/i);
+  const j = corregido.search(/[a-zñáéíóú]/i);
+  if (i < 0 || j < 0) return corregido;
+  if (original[i] !== original[i].toUpperCase()) return corregido;
+  return corregido.slice(0, j) + corregido[j].toUpperCase() + corregido.slice(j + 1);
+}
+
+function conTildes(texto) {
+  let t = String(texto).replace(CIERRE_CION, '$1$2ión');
+  for (const [re, con] of SIN_TILDE) {
+    t = t.replace(re, (...args) => {
+      const m = args[0];
+      /* El reemplazo trae $1/$2, asi que se resuelve a mano antes de arreglar
+         la caja: String.replace ya no lo hace si se le pasa una funcion. */
+      const puesto = con.replace(/\$(\d)/g, (_, n) => args[Number(n)] || '');
+      return comoVenia(m, puesto);
+    });
+  }
+  return t;
+}
+
 /* WhatsApp no entiende Markdown: la negrita es *un* asterisco, no dos.
    Sin esta limpieza el cliente ve los asteriscos escritos en el mensaje. */
 function aFormatoWhatsApp(texto) {
-  return String(texto)
+  return conTildes(texto)
     .replace(/\*\*\*(.+?)\*\*\*/gs, '*$1*')   /* ***x*** -> *x*   */
     .replace(/\*\*(.+?)\*\*/gs,     '*$1*')   /* **x**   -> *x*   */
     .replace(/^#{1,6}\s+/gm,        '')       /* quita encabezados */
@@ -140,15 +217,80 @@ function aFormatoWhatsApp(texto) {
 
 /* Horario. modo "siempre" = el bot contesta 24/7.
    modo "fuera_de_horario" = calla de lunes a viernes entre inicio y fin (hora Bogota). */
+const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+const bogota = now => {
+  const b = new Date(now.getTime() - 5 * 3600 * 1000);   /* Bogota no tiene horario de verano */
+  return { dow: b.getUTCDay(), hora: b.getUTCHours() };
+};
+
+/**
+ * Horario de la PERSONA que atiende, no del bot.
+ *
+ * ventanas: { 0..6: [horaInicio, horaFin] } en hora de Bogota, donde 0 es
+ * domingo. Un dia sin ventana es un dia en que no hay nadie.
+ *
+ * La forma vieja (modo "fuera_de_horario" con inicio/fin) solo sabia de lunes
+ * a viernes y daba el fin de semana por libre. Se traduce a ventanas para no
+ * romper a quien ya la tenga configurada.
+ */
+function ventanasDe(horario) {
+  const h = horario || {};
+  if (h.ventanas) return h.ventanas;
+  if (h.modo === 'fuera_de_horario') {
+    const ini = Number.isFinite(h.inicio) ? h.inicio : 9;
+    const fin = Number.isFinite(h.fin)    ? h.fin    : 19;
+    return { 1: [ini, fin], 2: [ini, fin], 3: [ini, fin], 4: [ini, fin], 5: [ini, fin] };
+  }
+  return null;
+}
+
+const ventanaDelDia = (v, dow) => (v ? (v[dow] || v[String(dow)] || null) : null);
+
+/** Si hay alguien del equipo atendiendo en este momento. */
+function hayHumano(horario, now = new Date()) {
+  const v = ventanasDe(horario);
+  if (!v) return false;
+  const { dow, hora } = bogota(now);
+  const r = ventanaDelDia(v, dow);
+  return Boolean(r) && hora >= r[0] && hora < r[1];
+}
+
+/**
+ * Cuando vuelve a haber alguien, en palabras: "hoy a las 8", "mañana a las 11".
+ * Sirve para que el asistente no prometa "en un momento" a las once de la
+ * noche, que es la forma mas rapida de quemar la confianza del cliente.
+ */
+function proximaApertura(horario, now = new Date()) {
+  const v = ventanasDe(horario);
+  if (!v) return null;
+  const { dow, hora } = bogota(now);
+  const hoy = ventanaDelDia(v, dow);
+  if (hoy && hora < hoy[0]) return `hoy a las ${hoy[0]}:00`;
+  for (let i = 1; i <= 7; i++) {
+    const d = (dow + i) % 7;
+    const r = ventanaDelDia(v, d);
+    if (r) return i === 1 ? `mañana a las ${r[0]}:00` : `el ${DIAS[d]} a las ${r[0]}:00`;
+  }
+  return null;
+}
+
+/**
+ * Si el asistente debe contestar.
+ *
+ * Por defecto contesta SIEMPRE, incluso cuando hay alguien del equipo. Con una
+ * linea que recibe trafico de pauta, que Pris conteste en tres segundos y que
+ * la persona retome cuando pueda es mejor que dejar al cliente esperando a que
+ * alguien abra la bandeja. Solo calla si se pide explicito con
+ * bot_calla_en_horario.
+ */
 function botDebeResponder(horario, now = new Date()) {
   const h = horario || { modo: 'siempre' };
-  if (h.modo !== 'fuera_de_horario') return true;
-  const bog = new Date(now.getTime() - 5 * 3600 * 1000);
-  const dow = bog.getUTCDay(), hora = bog.getUTCHours();
-  if (dow === 0 || dow === 6) return true;
-  const ini = Number.isFinite(h.inicio) ? h.inicio : 9;
-  const fin = Number.isFinite(h.fin)    ? h.fin    : 19;
-  return hora < ini || hora >= fin;
+  const calla = h.bot_calla_en_horario !== undefined
+    ? Boolean(h.bot_calla_en_horario)
+    : h.modo === 'fuera_de_horario';   /* como se comportaba antes */
+  if (!calla) return true;
+  return !hayHumano(h, now);
 }
 
 /**
@@ -267,6 +409,29 @@ async function llamarClaude(system, messages, herramientas = HERRAMIENTAS) {
 /**
  * Corre el cerebro sobre el historial. Devuelve el texto y si pidio escalar.
  */
+/**
+ * La talla que el cliente escribio, por si el modelo no la pasa al buscador.
+ *
+ * El 19 de noviembre de 2026 preguntaron "tienen vestidos talla XL" y el
+ * modelo busco "vestidos" sin talla. Sin talla pedida no hay nada que
+ * confirmar, asi que toda la logica de "talla por confirmar" se quedo dormida
+ * y la respuesta nunca hablo de tallas. Pedirselo en la descripcion de la
+ * herramienta no alcanzo.
+ *
+ * Exige la palabra "talla": una "L" o un "38" sueltos aparecen demasiado en
+ * cualquier frase como para arriesgar un filtro que no pidieron. Y mira solo
+ * el mensaje de ahora, no el historial, para no arrastrar una talla vieja a
+ * una pregunta nueva.
+ */
+/* El \b despues de "tallas?" no sobra: sin el, en "que tallas tienen" la s de
+   "tallas" se leia como la talla S y filtraba una busqueda que nadie pidio. */
+const TALLA_DICHA = /\btallas?\b\s*(?:es|:|=)?\s*(xxl|xl|xs|s|m|l|\d{1,2})\b/i;
+
+function tallaDelMensaje(texto) {
+  const m = TALLA_DICHA.exec(String(texto || ''));
+  return m ? m[1].toLowerCase() : null;
+}
+
 async function correrAsistente(cfg, historial, origen) {
   const system = armarSystem(cfg, origen);
   const messages = historial.slice(-MAX_TURNOS).map(m => ({
@@ -278,6 +443,8 @@ async function correrAsistente(cfg, historial, origen) {
   }
 
   const herramientas = herramientasDe(cfg);
+  const ultimoCliente = [...historial].reverse().find(m => m.de === 'cliente');
+  const tallaDicha = tallaDelMensaje(ultimoCliente && ultimoCliente.texto);
   let escalar = null, nombre = null, productos = [];
   let resp = await llamarClaude(system, messages, herramientas);
 
@@ -288,20 +455,31 @@ async function correrAsistente(cfg, historial, origen) {
       let out = 'ok';
       if (b.name === 'pasar_a_humano') {
         escalar = b.input || {};
-        out = 'Listo, la conversación queda marcada para que la retome una persona. Despídete con calma y dile que en un momento le responden por aquí mismo.';
+        /* El cuando depende de la hora: prometer "en un momento" de madrugada
+           es la forma mas rapida de quemar la confianza del cliente. */
+        const cuando = hayHumano(cfg.horario)
+          ? 'en un momento le responden por aquí mismo'
+          : (proximaApertura(cfg.horario)
+              ? `${cfg.nombre_humano} le escribe ${proximaApertura(cfg.horario)}`
+              : 'le responden en el horario de atención');
+        out = `Listo, la conversación queda marcada para que la retome una persona. ` +
+              `Despídete con calma y dile que ${cuando}.`;
       } else if (b.name === 'guardar_contacto') {
         nombre = (b.input || {}).nombre || null;
         out = 'Nombre guardado.';
       } else if (b.name === 'buscar_producto') {
         const inp = b.input || {};
+        /* Si el modelo no la paso pero el cliente si la dijo, se la ponemos. */
+        const talla = inp.talla || tallaDicha || undefined;
+        if (!inp.talla && talla) console.log(`[wa] el modelo no paso la talla, la saco del mensaje: ${talla}`);
         try {
           const r = await catalogo.buscarEnTienda(cfg.catalogo, {
-            texto: inp.que, talla: inp.talla, color: inp.color, precioMax: inp.precio_max,
+            texto: inp.que, talla, color: inp.color, precioMax: inp.precio_max,
           });
           /* Sin esta linea no hay forma de saber, mirando el log, si el
              asistente busco o solo dijo que iba a buscar. */
           console.log(`[wa] busco "${inp.que}"` +
-            (inp.talla ? ` talla ${inp.talla}` : '') +
+            (talla ? ` talla ${talla}` : '') +
             (inp.color ? ` ${inp.color}` : '') +
             (inp.precio_max ? ` hasta ${inp.precio_max}` : '') +
             ` -> ${r.items.length} resultado(s)`);
@@ -775,18 +953,24 @@ router.get('/config', async (req, res) => res.json(await leerConfig(req.companyI
 
 router.put('/config', async (req, res) => {
   const b = req.body || {};
+  /* Antes esto escribia la fila entera con valores por defecto: mandar solo
+     { horario } borraba el system_prompt, la base de conocimiento y el
+     catalogo de la empresa. Ahora lo que no venga se conserva. */
+  const actual = await leerConfig(req.companyId);
+  const campo = (k, def) => (b[k] !== undefined ? b[k]
+                           : (actual[k] !== undefined && actual[k] !== null ? actual[k] : def));
   const fila = {
     company_id: req.companyId,
-    activo:            b.activo !== undefined ? Boolean(b.activo) : true,
-    numero:            b.numero || null,
-    nombre_bot:        b.nombre_bot || 'Asistente',
-    nombre_humano:     b.nombre_humano || 'nuestro equipo',
-    system_prompt:     b.system_prompt || null,
-    base_conocimiento: b.base_conocimiento || null,
-    horario:           b.horario || { modo: 'siempre' },
-    silencio_min:      Number(b.silencio_min) || 45,
-    escalamiento_min:  Number(b.escalamiento_min) || 90,
-    catalogo:          b.catalogo || null,
+    activo:            b.activo !== undefined ? Boolean(b.activo) : (actual.activo !== false),
+    numero:            campo('numero', null),
+    nombre_bot:        campo('nombre_bot', 'Asistente'),
+    nombre_humano:     campo('nombre_humano', 'nuestro equipo'),
+    system_prompt:     campo('system_prompt', null),
+    base_conocimiento: campo('base_conocimiento', null),
+    horario:           campo('horario', { modo: 'siempre' }),
+    silencio_min:      Number(campo('silencio_min', 45)) || 45,
+    escalamiento_min:  Number(campo('escalamiento_min', 90)) || 90,
+    catalogo:          campo('catalogo', null),
     updated_at:        new Date().toISOString(),
   };
   const { error } = await supabase.from('wa_config').upsert(fila, { onConflict: 'company_id' });
@@ -818,4 +1002,6 @@ module.exports.procesarEntrante = procesarEntrante;
 
 /* Expuesto solo para pruebas de la logica pura, sin base de datos. */
 module.exports._test = { botDebeResponder, conAvisoLegal, armarSystem, normTel, razonParaCallar,
-                         origenDe, textoDeOrigen, pieDeFoto, aFormatoWhatsApp };
+                         origenDe, textoDeOrigen, pieDeFoto, aFormatoWhatsApp,
+                         conTildes, tallaDelMensaje,
+                         hayHumano, proximaApertura, ventanasDe, textoDeHorario };
