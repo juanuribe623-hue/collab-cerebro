@@ -2,8 +2,17 @@
 <html lang="es">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Cerebro Casa Precis - Collab</title>
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="theme-color" content="#13245A" />
+<link rel="icon" href="/icon-192.png" />
+<!-- iOS no lee el manifest: necesita sus propias etiquetas para que "Agregar
+     a inicio" abra sin la barra de Safari y con el icono correcto. -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Cerebro" />
+<link rel="apple-touch-icon" href="/icon-192.png" />
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root{
@@ -99,6 +108,38 @@
   .modal-foot{display:flex;gap:10px;justify-content:flex-end;padding:14px 22px;border-top:1px solid var(--line)}
   .plats{display:grid;grid-template-columns:1fr 1fr;gap:18px}
   @media(max-width:760px){.plats{grid-template-columns:1fr}}
+
+  /* ---- Celular ----------------------------------------------------------
+     El panel estaba hecho para escritorio: barra lateral de 230px al lado del
+     contenido. En un telefono de 375px eso deja 145px utiles y no sirve.
+     Aqui la barra pasa a ser una tira horizontal arriba, y la bandeja deja de
+     ser dos columnas: se ve la lista, y al abrir un chat se ve el chat con un
+     boton para volver, como cualquier app de mensajeria. */
+  .wa-volver{display:none;align-items:center;gap:6px;background:none;border:none;
+             color:var(--navy);font-size:15px;font-weight:600;cursor:pointer;padding:0 8px 0 0}
+  @media(max-width:760px){
+    #app{display:block}
+    #sidebar{width:auto;padding:10px 0 0;position:sticky;top:0;z-index:30}
+    #sidebar .logo{padding:0 14px 8px;font-size:15px}
+    #sidebar nav{display:flex;overflow-x:auto;gap:2px;padding:0 8px 6px;-webkit-overflow-scrolling:touch}
+    #sidebar nav a{white-space:nowrap;padding:8px 13px;border-left:none;
+                   border-bottom:3px solid transparent;font-size:13px}
+    #sidebar nav a.active{border-left-color:transparent;border-bottom-color:var(--sky)}
+    #sidebar .user{display:flex;justify-content:space-between;align-items:center;
+                   padding:6px 14px;font-size:11px;opacity:.8}
+    #main{padding:14px 12px}
+    .head{flex-direction:column;align-items:flex-start;gap:8px}
+
+    .wa-wrap{flex-direction:column;gap:0;height:calc(100vh - 185px);min-height:0}
+    .wa-list-col{width:auto;flex:1;min-height:0}
+    .wa-thread-col{display:none;min-height:0}
+    .wa-wrap.chat-abierto .wa-list-col{display:none}
+    .wa-wrap.chat-abierto .wa-thread-col{display:block;flex:1}
+    .wa-volver{display:inline-flex}
+    .wa-media{max-width:72vw;max-height:60vh}
+    /* El teclado del celular tapa la barra de escribir si queda muy angosta */
+    .wa-input-row{padding:10px 12px;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+  }
   .plat-block{border:1px solid var(--line);border-radius:11px;overflow:hidden}
   .plat-block .ph{padding:10px 14px;font-weight:700;font-size:13px;color:#fff}
   .plat-block.ig .ph{background:linear-gradient(90deg,#C13584,#E1306C)}
@@ -224,6 +265,13 @@
   .wa-tag{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;opacity:.75;margin-bottom:3px}
   .wa-bubble-text{white-space:pre-wrap;word-break:break-word}
   .wa-bubble-time{font-size:10px;opacity:.65;margin-top:4px;text-align:right}
+  .wa-media{max-width:240px;max-height:300px;width:auto;border-radius:8px;display:block;margin-bottom:5px;background:rgba(0,0,0,.06);min-height:60px}
+  .wa-media.ok{min-height:0;background:none}
+  .wa-media-audio{width:220px;margin-bottom:5px}
+  .wa-media-doc{display:inline-block;margin-bottom:5px;font-size:12px;text-decoration:underline;color:inherit}
+  .wa-media-falla{font-size:11px;opacity:.7;font-style:italic;margin-bottom:5px}
+  .wa-adjuntar{padding:8px 11px;font-size:16px;line-height:1;background:#fff;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+  .wa-adjuntar:disabled{opacity:.5;cursor:default}
   .wa-input-row{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--line);align-items:flex-end}
   .wa-input-row textarea{flex:1;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;resize:none;max-height:100px}
 </style>
@@ -636,7 +684,7 @@
         </div>
       </details>
 
-      <div class="wa-wrap">
+      <div class="wa-wrap" id="waWrap">
         <div class="wa-list-col">
           <input id="waSearch" class="wa-search" placeholder="Buscar por nombre o telefono" oninput="filtrarChatsWA()">
           <div id="waList" class="wa-list"><div class="empty">Cargando conversaciones...</div></div>
@@ -726,6 +774,15 @@ async function boot(){
   await loadWatchlist();
   await loadCalendar();
   await loadInsights();
+  /* El acceso directo del celular abre en /?v=wa, para caer directo en la
+     bandeja y no tener que buscarla en el menu cada vez. */
+  const v = new URLSearchParams(location.search).get('v');
+  if(v && document.getElementById('view-'+v)) go(v);
+}
+
+/* Instalable en el celular. No cachea nada: ver el comentario en sw.js. */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=> navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 }
 
 // ───────── Brief de marca ─────────
@@ -2433,8 +2490,20 @@ function renderListaWA(){
   }).join('');
 }
 
+/* En celular la bandeja es de una sola columna: esta clase decide si se ve la
+   lista o el chat. En escritorio no hace nada, se siguen viendo las dos. */
+function volverListaWA(){
+  WA_ACTIVE = null;
+  WA_ACTIVE_CHAT = null;
+  clearInterval(waThreadInterval);
+  document.getElementById('waWrap')?.classList.remove('chat-abierto');
+  renderListaWA();
+  renderHiloWA();
+}
+
 async function abrirChatWA(id){
   WA_ACTIVE = id;
+  document.getElementById('waWrap')?.classList.add('chat-abierto');
   renderListaWA();
   clearInterval(waThreadInterval);
   await cargarHiloWA();
@@ -2455,14 +2524,55 @@ async function cargarHiloWA(){
   }
 }
 
+/* El archivo no se puede poner como src directo: la ruta pide el token en la
+   cabecera y una etiqueta <img> no lo manda. Se baja con fetch y se muestra
+   como blob. */
+function waCuerpoMedia(m){
+  if(!m.media_id) return '';
+  const t = m.tipo;
+  if(t==='image')    return `<img class="wa-media" data-media="${esc(m.media_id)}" alt="Imagen del chat">`;
+  if(t==='video')    return `<video class="wa-media" data-media="${esc(m.media_id)}" controls playsinline></video>`;
+  if(t==='audio')    return `<audio class="wa-media-audio" data-media="${esc(m.media_id)}" controls></audio>`;
+  return `<a class="wa-media-doc" data-media="${esc(m.media_id)}" href="#" download="${esc(m.filename||'archivo')}">📎 ${esc(m.filename||'Descargar archivo')}</a>`;
+}
+
+async function pintarMediaWA(){
+  const token = await getToken();
+  for(const el of document.querySelectorAll('[data-media]')){
+    if(el.dataset.listo) continue;
+    el.dataset.listo = '1';
+    try{
+      const r = await fetch(CONFIG.API_BASE+'/api/whatsapp/media/'+el.dataset.media,
+                            { headers: token ? {Authorization:'Bearer '+token} : {} });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const url = URL.createObjectURL(await r.blob());
+      if(el.tagName==='A'){ el.href = url; }
+      else { el.src = url; }
+      el.classList.add('ok');
+    }catch(e){
+      el.replaceWith(Object.assign(document.createElement('div'),
+        {className:'wa-media-falla', textContent:'No se pudo cargar el archivo'}));
+    }
+  }
+}
+
 function waBurbuja(m){
   const lado = m.de==='cliente' ? 'in' : 'out';
   const clase = m.de==='bot' ? 'bot' : (m.de==='humano' ? 'humano' : 'cliente');
   const tag = m.de==='bot' ? '<span class="wa-tag">Asistente</span>' : (m.de==='humano' ? '<span class="wa-tag">Gabi</span>' : '');
+  const cuerpo = waCuerpoMedia(m);
+  /* Cuando el cliente manda una foto sin comentario, el webhook guarda
+     "[imagen]" como texto para que el asistente sepa qué llegó. Eso es para el
+     modelo, no para la pantalla: debajo de la foto sobra. */
+  const RELLENOS = ['[imagen]','[video]','[documento]','[nota de voz]'];
+  const pie = RELLENOS.includes((m.texto||'').trim()) ? '' : (m.texto||'');
+  const txt = (cuerpo && !pie) ? '' :
+              `<div class="wa-bubble-text">${esc(pie)}</div>`;
   return `<div class="wa-bubble-row ${lado}">
     <div class="wa-bubble ${clase}">
       ${tag}
-      <div class="wa-bubble-text">${esc(m.texto||'')}</div>
+      ${cuerpo}
+      ${txt}
       <div class="wa-bubble-time">${esc(waHora(m.ts))}</div>
     </div>
   </div>`;
@@ -2477,9 +2587,12 @@ function renderHiloWA(){
   const nombre = chat.nombre || chat.telefono || 'Sin numero';
   wrap.innerHTML = `
     <div class="wa-thread-head">
-      <div>
-        <div class="wa-thread-name">${esc(nombre)}</div>
-        <div class="wa-thread-tel">${esc(chat.telefono||'')}</div>
+      <div style="display:flex;align-items:center;min-width:0">
+        <button class="wa-volver" onclick="volverListaWA()" title="Volver a la lista">&#8249;</button>
+        <div style="min-width:0">
+          <div class="wa-thread-name">${esc(nombre)}</div>
+          <div class="wa-thread-tel">${esc(chat.telefono||'')}</div>
+        </div>
       </div>
       <label class="wa-switch-wrap">
         <input type="checkbox" id="waTomarChk" ${chat.tomado?'checked':''} onchange="toggleTomarWA(this.checked)">
@@ -2495,12 +2608,20 @@ function renderHiloWA(){
       ${msgs.length ? msgs.map(waBurbuja).join('') : '<div class="empty">Todavia no hay mensajes.</div>'}
     </div>
     <div class="wa-input-row">
+      <input type="file" id="waArchivo" style="display:none"
+             accept="image/*,video/*,application/pdf" onchange="enviarMediaWA(this)">
+      <button class="btn wa-adjuntar" id="waClipBtn" title="Enviar foto, video o PDF"
+              onclick="document.getElementById('waArchivo').click()">📎</button>
       <textarea id="waTexto" rows="1" placeholder="Escribe un mensaje" onkeydown="waKeydown(event)"></textarea>
       <button class="btn btn-primary" onclick="enviarWA()" id="waSendBtn">Enviar</button>
     </div>
   `;
   const msgsEl = document.getElementById('waMsgs');
   if(msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+  /* Los archivos se bajan despues de pintar el hilo: el texto aparece de una
+     y las fotos van entrando. Al terminar se baja otra vez, porque las
+     imagenes cambian el alto del hilo. */
+  pintarMediaWA().then(()=>{ if(msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight; });
 }
 
 function waKeydown(e){
@@ -2508,6 +2629,36 @@ function waKeydown(e){
     e.preventDefault();
     enviarWA();
   }
+}
+
+/* El texto que esté escrito se manda como pie de foto, que es lo que uno
+   espera al adjuntar algo con un comentario ya escrito. */
+async function enviarMediaWA(input){
+  const file = input.files && input.files[0];
+  input.value = '';
+  if(!file || !WA_ACTIVE) return;
+
+  const clip = document.getElementById('waClipBtn');
+  const texto = document.getElementById('waTexto');
+  const antes = clip.textContent;
+  clip.disabled = true; clip.textContent = '⏳';
+  try{
+    const dataB64 = await new Promise((ok, mal)=>{
+      const fr = new FileReader();
+      fr.onload  = ()=> ok(String(fr.result).split(',')[1] || '');
+      fr.onerror = ()=> mal(new Error('No se pudo leer el archivo'));
+      fr.readAsDataURL(file);
+    });
+    await api('/api/whatsapp/chats/'+WA_ACTIVE+'/enviar-media', {method:'POST', body:{
+      filename: file.name, mime: file.type || 'application/octet-stream',
+      dataB64, caption: (texto?.value || '').trim(),
+    }});
+    if(texto) texto.value = '';
+    await cargarHiloWA();
+  }catch(e){
+    toast('No se pudo enviar el archivo: '+e.message);
+  }
+  clip.disabled = false; clip.textContent = antes;
 }
 
 async function enviarWA(){

@@ -22,6 +22,7 @@
 const router   = require('express').Router();
 const supabase = require('./_supabase');
 const catalogo = require('./_catalogo');
+const media    = require('./_media');
 const { requireAuth } = require('./_auth');
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
@@ -884,6 +885,83 @@ router.post('/chats/:id/enviar', async (req, res) => {
     .eq('id', chat.id);
 
   res.json({ ok: true, simulado: Boolean(env.simulado), silencio_hasta: hasta });
+});
+
+/**
+ * El archivo de un mensaje, para mostrarlo en la bandeja.
+ *
+ * El filtro por empresa no sobra: el id de Meta es un numero y esta app
+ * atiende a varias empresas, asi que sin esta comprobacion quien conozca un id
+ * podria ver la foto que le mandaron a otro cliente.
+ */
+router.get('/media/:mediaId', async (req, res) => {
+  const id = media.idLimpio(req.params.mediaId);
+  if (!id) return res.sendStatus(400);
+
+  const { data: fila } = await supabase
+    .from('wa_mensajes').select('id')
+    .eq('company_id', req.companyId).eq('media_id', id)
+    .limit(1).maybeSingle();
+  if (!fila) return res.sendStatus(404);
+
+  const archivo = await media.obtener(id);
+  if (!archivo) return res.sendStatus(404);
+
+  /* Privado a proposito: lleva fotos de clientes y no puede quedar en ninguna
+     cache compartida. */
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.type(archivo.mime || 'application/octet-stream');
+  res.send(archivo.buf);
+});
+
+/**
+ * Enviar una foto, un video o un documento desde la bandeja.
+ *
+ * Llega en base64 porque es lo que el navegador manda mas facil desde un
+ * input de archivo, y el limite de 30mb del servidor da para los 16MB de video
+ * que acepta WhatsApp, que en base64 pesan unos 21.
+ */
+router.post('/chats/:id/enviar-media', async (req, res) => {
+  const { filename, mime, dataB64, caption } = req.body || {};
+  if (!dataB64 || !mime) return res.status(400).json({ error: 'Falta el archivo' });
+
+  const { data: chat } = await supabase
+    .from('wa_chats').select('*')
+    .eq('company_id', req.companyId).eq('id', req.params.id).maybeSingle();
+  if (!chat) return res.status(404).json({ error: 'Esa conversación no existe' });
+
+  let buf;
+  try {
+    buf = Buffer.from(String(dataB64), 'base64');
+  } catch (e) {
+    return res.status(400).json({ error: 'El archivo llegó dañado' });
+  }
+  if (!buf.length) return res.status(400).json({ error: 'El archivo llegó vacío' });
+
+  const subida = await media.subirAMeta(buf, mime, filename);
+  if (!subida.ok) return res.status(400).json({ error: subida.error });
+
+  const env = await media.enviarArchivo(chat.telefono, subida.mediaId, subida.tipo, caption, filename);
+  if (!env.ok) return res.status(400).json({ error: env.error });
+
+  await agregarMensaje(chat, 'humano', {
+    tipo: subida.tipo,
+    texto: String(caption || '').slice(0, 1000),
+    mediaId: subida.mediaId,
+    mime,
+    filename: filename || null,
+  }, req.userId);
+
+  /* Mismo trato que un mensaje de texto: si escribio una persona, el asistente
+     se calla un rato y la peticion de ayuda queda atendida. */
+  const cfg = await leerConfig(req.companyId);
+  const hasta = new Date(Date.now() + (cfg.silencio_min || 45) * 60000).toISOString();
+  await supabase.from('wa_chats')
+    .update({ silencio_hasta: hasta, escalado_hasta: null, no_leido: false,
+              ultimo_ts: new Date().toISOString() })
+    .eq('id', chat.id);
+
+  res.json({ ok: true, media_id: subida.mediaId, tipo: subida.tipo });
 });
 
 router.post('/chats/:id/tomar', async (req, res) => {
