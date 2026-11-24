@@ -667,6 +667,7 @@
           <h2>WhatsApp</h2>
           <div class="sub">Bandeja de conversaciones. Responde tu o deja que el asistente conteste por ti.</div>
         </div>
+        <button class="btn" id="waAvisosBtn" onclick="activarAvisosWA()" style="display:none">Activar avisos</button>
       </div>
 
       <details class="card wa-test" id="waTestPanel" style="display:none;margin-bottom:16px">
@@ -2490,6 +2491,59 @@ function renderListaWA(){
   }).join('');
 }
 
+/* ───────── Avisos al celular ─────────
+   Solo sirven con la app instalada o el navegador abierto en segundo plano.
+   En iPhone hay una condicion que confunde: Safari solo deja activar avisos
+   si la pagina se agrego a la pantalla de inicio, no desde el navegador. */
+const AVISOS_SOPORTADOS = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+function b64aBytes(b64){
+  const relleno = '='.repeat((4 - b64.length % 4) % 4);
+  const limpio = (b64 + relleno).replace(/-/g,'+').replace(/_/g,'/');
+  const bin = atob(limpio);
+  return Uint8Array.from([...bin].map(c=>c.charCodeAt(0)));
+}
+
+async function estadoAvisosWA(){
+  const btn = document.getElementById('waAvisosBtn');
+  if(!btn) return;
+  if(!AVISOS_SOPORTADOS){ btn.style.display='none'; return; }
+  btn.style.display = '';
+  if(Notification.permission === 'denied'){
+    btn.textContent = 'Avisos bloqueados'; btn.disabled = true;
+    btn.title = 'Los bloqueaste en el navegador. Hay que volver a permitirlos desde los ajustes del sitio.';
+    return;
+  }
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = reg && await reg.pushManager.getSubscription();
+  btn.disabled = false;
+  btn.textContent = sub ? 'Avisos activados' : 'Activar avisos';
+  btn.title = sub ? 'Este dispositivo ya recibe avisos' : 'Recibe un aviso cuando te necesiten';
+}
+
+async function activarAvisosWA(){
+  const btn = document.getElementById('waAvisosBtn');
+  if(!AVISOS_SOPORTADOS){ toast('Este navegador no permite avisos.'); return; }
+  btn.disabled = true;
+  try{
+    const permiso = await Notification.requestPermission();
+    if(permiso !== 'granted'){ toast('No diste permiso para los avisos.'); await estadoAvisosWA(); return; }
+
+    const reg = await navigator.serviceWorker.ready;
+    const { key } = await api('/api/whatsapp/push/llave');
+    if(!key) throw new Error('el servidor no tiene las llaves configuradas');
+
+    const sub = await reg.pushManager.getSubscription()
+      || await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: b64aBytes(key) });
+
+    await api('/api/whatsapp/push/suscribir', {method:'POST', body:{ sub: sub.toJSON() }});
+    toast('Listo, este dispositivo va a recibir los avisos.');
+  }catch(e){
+    toast('No se pudieron activar los avisos: '+e.message);
+  }
+  await estadoAvisosWA();
+}
+
 /* En celular la bandeja es de una sola columna: esta clase decide si se ve la
    lista o el chat. En escritorio no hace nada, se siguen viendo las dos. */
 function volverListaWA(){
@@ -2717,6 +2771,7 @@ function pararWA(){
 async function abrirVistaWA(){
   pararWA();
   waEstado();
+  estadoAvisosWA();
   await cargarChatsWA();
   waListInterval = setInterval(cargarChatsWA, 10000);
   if(WA_ACTIVE){

@@ -192,4 +192,37 @@ async function enviarArchivo(telefono, mediaId, tipo, pie, filename) {
   return { ok: false, error: 'No se pudo enviar el archivo.' };
 }
 
-module.exports = { obtener, subirAMeta, enviarArchivo, tipoDeMime, idLimpio, TOPES };
+/* ------------------------------------------------------------------ */
+/* JSON pequeños en el mismo bucket                                     */
+/* ------------------------------------------------------------------ */
+/* Lo usa _push.js para las llaves y las suscripciones. Son cuatro datos y no
+   justifican una tabla nueva, pero tampoco pueden vivir en el disco de
+   Railway, que se borra en cada despliegue.
+   No chocan con los archivos de WhatsApp porque esas rutas llevan letras y el
+   endpoint de media solo acepta cifras. */
+async function guardarJson(ruta, obj) {
+  if (!(await asegurarBucket())) return false;
+  try {
+    const buf = Buffer.from(JSON.stringify(obj), 'utf8');
+    const { error } = await supabase.storage.from(BUCKET)
+      .upload(ruta, buf, { contentType: 'application/json', upsert: true });
+    return !error;
+  } catch (e) {
+    console.warn('[almacen] no se pudo guardar', ruta, e.message);
+    return false;
+  }
+}
+
+async function leerJson(ruta) {
+  if (!(await asegurarBucket())) return null;
+  try {
+    const { data, error } = await supabase.storage.from(BUCKET).download(ruta);
+    if (error || !data) return null;
+    return JSON.parse(await data.text());
+  } catch (e) {
+    return null;
+  }
+}
+
+module.exports = { obtener, subirAMeta, enviarArchivo, tipoDeMime, idLimpio, TOPES,
+                   guardarJson, leerJson };

@@ -23,6 +23,7 @@ const router   = require('express').Router();
 const supabase = require('./_supabase');
 const catalogo = require('./_catalogo');
 const media    = require('./_media');
+const push     = require('./_push');
 const { requireAuth } = require('./_auth');
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
@@ -785,6 +786,18 @@ router.post('/webhook', async (req, res) => {
     const r = await procesarEntrante(companyId, msg.from, cont, perfil, origen);
     if (r && r.respuesta) console.log('[wa] respondido ok, chat', r.chat_id);
     else console.log('[wa] SIN RESPUESTA:', (r && r.motivo) || 'sin motivo');
+
+    /* Aviso al celular SOLO cuando de verdad hace falta una persona: el
+       asistente pidio ayuda, o no contesto (chat tomado, en silencio, fuera de
+       horario o apagado). Avisar de cada mensaje seria ruido y en dos dias
+       nadie miraria el celular. */
+    if (r && (r.escalado || !r.respuesta)) {
+      const quien = perfil || ('+' + String(msg.from || '').replace(/\D/g, ''));
+      await push.avisar(companyId, {
+        titulo: r.escalado ? `${quien} necesita una persona` : quien,
+        cuerpo: (cont.texto || '').slice(0, 140) || 'Te escribió por WhatsApp',
+      });
+    }
   } catch (e) {
     console.error('[wa webhook]', e.message);
   }
@@ -885,6 +898,26 @@ router.post('/chats/:id/enviar', async (req, res) => {
     .eq('id', chat.id);
 
   res.json({ ok: true, simulado: Boolean(env.simulado), silencio_hasta: hasta });
+});
+
+/* ------------------------------------------------------------------ */
+/* Avisos al celular                                                    */
+/* ------------------------------------------------------------------ */
+
+router.get('/push/llave', async (req, res) => {
+  const key = await push.llavePublica();
+  res.json({ key: key || null });
+});
+
+router.post('/push/suscribir', async (req, res) => {
+  const ok = await push.suscribir(req.companyId, req.body && req.body.sub);
+  if (!ok) return res.status(400).json({ error: 'No se pudo guardar el aviso' });
+  res.json({ ok: true });
+});
+
+router.post('/push/desuscribir', async (req, res) => {
+  await push.desuscribir(req.companyId, (req.body && req.body.endpoint) || '');
+  res.json({ ok: true });
 });
 
 /**

@@ -16,3 +16,35 @@
 self.addEventListener('install',  () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',    (e) => e.respondWith(fetch(e.request)));
+
+/* Aviso cuando hace falta una persona. El servidor solo lo manda en ese caso,
+   asi que aqui no hay que filtrar nada. */
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) {}
+  e.waitUntil(self.registration.showNotification(d.title || 'Casa Precis', {
+    body: d.body || 'Te escribieron por WhatsApp',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    data: { url: d.url || '/?v=wa' },
+    /* Misma etiqueta: si llegan varios seguidos se apilan en uno solo en vez
+       de llenar la pantalla de avisos. */
+    tag: 'wa',
+    renotify: true,
+  }));
+});
+
+/* Al tocarlo, se va a la bandeja. Si ya hay una ventana abierta se reutiliza
+   en vez de abrir otra, que es lo que mas molesta de estos avisos. */
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/?v=wa';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((lista) => {
+      for (const c of lista) {
+        if ('focus' in c) { c.navigate(url); return c.focus(); }
+      }
+      return self.clients.openWindow(url);
+    })
+  );
+});
